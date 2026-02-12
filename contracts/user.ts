@@ -14,7 +14,7 @@ export interface User {
  * Exemple de contrat produit
  */
 export interface Product {
-  id: string;
+  id: number;
   title: string;
   description: string;
   price: number;
@@ -27,7 +27,7 @@ export interface Product {
  * Exemple de contrat avec types imbriqués
  */
 export interface Order {
-  id: string;
+  id: number;
   userId: number;
   items: OrderItem[];
   total: number;

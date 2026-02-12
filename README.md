@@ -12,7 +12,7 @@ Enable Front-end developers to work in total isolation by intercepting API calls
 
 **Core**
 - **Language** : TypeScript (strict mode)
-- **Runtime** : Node.js 18+
+- **Runtime** : Node.js 24+
 - **Package Manager** : npm
 
 **Server & API**
