@@ -22,13 +22,13 @@ Enable Front-end developers to work in total isolation by intercepting API calls
 - **API Documentation** : Swagger UI Express (auto-generated from TypeScript interfaces)
 
 **Data Generation**
-- **Type Analysis** : Intermock (uses TypeScript AST to generate data)
-- **Random Data** : Faker-js (via Intermock)
+- **Type Analysis** : Intermock (uses TypeScript AST to generate data) | https://github.com/google/intermock#readme
+- **Random Data** : Faker-js (via Intermock) | http://fakerjs.dev/
 
 **CLI & Tooling**
-- **CLI** : Commander.js
-- **File Watching** : chokidar (hot-reload)
-- **Logging** : chalk
+- **CLI** : Commander.js | https://github.com/tj/commander.js#readme
+- **File Watching** : chokidar (hot-reload) | https://github.com/paulmillr/chokidar
+- **Logging** : chalk | https://github.com/chalk/chalk#readme
 
 **Development**
 - **Tests** : Jest + ts-jest
