@@ -132,8 +132,7 @@ function interfaceNameToPath(interfaceName: string): string {
  * Generates OpenAPI specification from TypeScript interfaces
  */
 export function generateOpenAPISpec(config: ServerConfig): Record<string, unknown> {
-  const allDirs = [config.contractsDir, ...(config.externalDirs || [])];
-  const typeMap = buildTypeMap(allDirs);
+  const typeMap = buildTypeMap(config.typesDir);
 
   const paths: Record<string, Record<string, OpenAPIPath>> = {};
   const schemas: Record<string, unknown> = {};

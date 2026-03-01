@@ -13,11 +13,8 @@ export function dynamicRouteHandler(config: ServerConfig) {
     try {
       const url = req.url;
 
-      // Prepare the list of all directories to scan
-      const allDirs = [config.contractsDir, ...(config.externalDirs || [])];
-
       // Search for the type corresponding to the URL
-      const mapping = findTypeForUrl(url, allDirs);
+      const mapping = findTypeForUrl(url, config.typesDir);
 
       if (!mapping) {
         // Type not found - return 404

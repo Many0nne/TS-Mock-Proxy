@@ -2,17 +2,12 @@
  * TS-Mock-Proxy server configuration
  */
 export interface ServerConfig {
-  /** Path to the directory containing TypeScript contracts */
-  contractsDir: string;
-
-  /** Paths to external directories (projects or repos) */
-  externalDirs?: string[];
+  /** Path to the directory containing TypeScript type definitions */
+  typesDir: string;
 
   /** Server port */
   port: number;
 
-  /** Real backend URL for proxy mode (optional) */
-  targetUrl?: string;
 
   /** Simulated latency (min-max in milliseconds) */
   latency?: {
@@ -28,6 +23,17 @@ export interface ServerConfig {
 
   /** Verbose mode for logging */
   verbose: boolean;
+}
+
+/**
+ * Interface metadata with endpoint flag information
+ */
+export interface InterfaceMetadata {
+  /** Interface name */
+  name: string;
+
+  /** Whether the interface has the // @endpoint flag */
+  hasEndpointFlag: boolean;
 }
 
 /**

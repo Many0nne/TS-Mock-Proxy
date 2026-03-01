@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { RouteTypeMapping } from '../types/config';
+import { RouteTypeMapping, InterfaceMetadata } from '../types/config';
 import { parseUrlToType } from './pluralize';
 
 /**
@@ -11,6 +11,16 @@ export function findTypeScriptFiles(dir: string): string[] {
 
   function scan(currentDir: string): void {
     if (!fs.existsSync(currentDir)) {
+      return;
+    }
+
+    const stat = fs.statSync(currentDir);
+
+    // If a file path was provided, add it directly (supports passing file paths)
+    if (stat.isFile()) {
+      if (currentDir.endsWith('.ts')) {
+        files.push(currentDir);
+      }
       return;
     }
 
@@ -35,45 +45,86 @@ export function findTypeScriptFiles(dir: string): string[] {
 }
 
 /**
- * Extracts all exported interface names from a TypeScript file
- * Uses a simple regex approach (can be improved with an AST parser)
+ * Extracts all exported interface names from a TypeScript file with endpoint flags
+ * Detects // @endpoint comments before interface declarations
  */
-export function extractInterfaceNames(filePath: string): string[] {
+export function extractInterfaceNames(filePath: string): InterfaceMetadata[] {
   const content = fs.readFileSync(filePath, 'utf-8');
-  const interfaceRegex = /export\s+interface\s+(\w+)/g;
-  const matches: string[] = [];
-  let match;
+  const lines = content.split('\n');
+  const metadata: InterfaceMetadata[] = [];
 
-  while ((match = interfaceRegex.exec(content)) !== null) {
-    if (match[1]) {
-      matches.push(match[1]);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] || '';
+    const interfaceMatch = /export\s+interface\s+(\w+)/.exec(line);
+
+    if (interfaceMatch && interfaceMatch[1]) {
+      const interfaceName = interfaceMatch[1];
+      
+      // Check preceding lines for @endpoint flag, skipping blank lines and comments
+      let hasEndpointFlag = false;
+      if (i > 0) {
+        const maxLookback = 10;
+        for (let j = i - 1; j >= 0 && i - j <= maxLookback; j--) {
+          const prevLineRaw = lines[j] || '';
+          const prevLine = prevLineRaw.trim();
+          // Skip empty lines
+          if (prevLine === '') {
+            continue;
+          }
+          const isLineComment = prevLine.startsWith('//');
+          const isBlockCommentPart =
+            prevLine.startsWith('/**') ||
+            prevLine.startsWith('/*') ||
+            prevLine.startsWith('*') ||
+            prevLine.startsWith('*/');
+          if (isLineComment || isBlockCommentPart) {
+            // Treat any comment line containing @endpoint as the flag
+            if (prevLine.includes('@endpoint')) {
+              hasEndpointFlag = true;
+              break;
+            }
+            // Continue scanning upwards through comment/JSDoc lines
+            continue;
+          }
+          // Reached a non-comment, non-blank line; stop scanning
+          break;
+        }
+      }
+
+      metadata.push({
+        name: interfaceName,
+        hasEndpointFlag,
+      });
     }
   }
 
-  return matches;
+  return metadata;
 }
 
 /**
  * Creates a mapping of all available types
+ * Only includes interfaces marked with // @endpoint
  * Map<TypeName, FilePath>
  */
-export function buildTypeMap(directories: string[]): Map<string, string> {
+export function buildTypeMap(directory: string): Map<string, string> {
   const typeMap = new Map<string, string>();
 
-  // Scan all directories (contracts + external dirs)
-  for (const dir of directories) {
-    const files = findTypeScriptFiles(dir);
+  const files = findTypeScriptFiles(directory);
 
-    for (const file of files) {
-      const interfaces = extractInterfaceNames(file);
-      for (const interfaceName of interfaces) {
-        // If the type already exists, keep the first one found
-        // (local contracts have priority)
-        if (!typeMap.has(interfaceName)) {
-          typeMap.set(interfaceName, file);
-        }
+  for (const file of files) {
+    const interfaceMetadata = extractInterfaceNames(file);
+
+    for (const metadata of interfaceMetadata) {
+      // Only include interfaces marked with // @endpoint
+      if (metadata.hasEndpointFlag && !typeMap.has(metadata.name)) {
+        typeMap.set(metadata.name, file);
       }
     }
+  }
+
+  if (typeMap.size > 0) {
+    // Debug: Log discovered endpoints
+    // console.debug(`[typeMapping] Discovered ${typeMap.size} endpoints:`, Array.from(typeMap.keys()));
   }
 
   return typeMap;
@@ -81,17 +132,18 @@ export function buildTypeMap(directories: string[]): Map<string, string> {
 
 /**
  * Finds the type corresponding to a URL
+ * Only finds types marked with // @endpoint
  *
  * @param url - Request URL
- * @param directories - Directories containing contracts (local + external)
+ * @param directory - Directory containing type definitions
  * @returns Route -> type mapping or null if not found
  */
 export function findTypeForUrl(
   url: string,
-  directories: string[]
+  directory: string
 ): RouteTypeMapping | null {
   const { typeName, isArray } = parseUrlToType(url);
-  const typeMap = buildTypeMap(directories);
+  const typeMap = buildTypeMap(directory);
 
   const filePath = typeMap.get(typeName);
 

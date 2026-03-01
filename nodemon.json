@@ -1,7 +1,7 @@
 {
   "watch": ["src"],
   "ext": "ts,json",
-  "ignore": ["src/**/*.test.ts", "node_modules", "dist"],
+  "ignore": ["src/**/*.test.ts", "node_modules", "dist", "build", ".mock-config.json", "**/types/**", "*/types", ".git/**"],
   "exec": "tsx src/index.ts",
   "env": {
     "NODE_ENV": "development"

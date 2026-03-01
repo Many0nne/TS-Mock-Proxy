@@ -1,4 +1,4 @@
-import express, { Express } from 'express';
+import express, { Express, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import swaggerUi from 'swagger-ui-express';
 import { ServerConfig } from './types/config';
@@ -7,7 +7,6 @@ import { requestLoggerMiddleware } from './middlewares/logger';
 import { latencyMiddleware } from './middlewares/latency';
 import { statusOverrideMiddleware } from './middlewares/statusOverride';
 import { dynamicRouteHandler } from './core/router';
-import { createProxyFallback } from './core/proxy';
 import { startFileWatcher } from './utils/fileWatcher';
 import { schemaCache } from './core/cache';
 import { generateOpenAPISpec } from './core/swagger';
@@ -18,6 +17,10 @@ import type { FSWatcher } from 'chokidar';
  */
 export function createServer(config: ServerConfig): Express {
   const app = express();
+
+  // Store swagger spec in the app locals so it can be updated on file changes
+  let swaggerSpec = generateOpenAPISpec(config);
+  app.locals.swaggerSpec = swaggerSpec;
 
   // Global middlewares
   app.use(cors());
@@ -42,27 +45,24 @@ export function createServer(config: ServerConfig): Express {
       uptime: process.uptime(),
       cache: schemaCache.getStats(),
       config: {
-        contractsDir: config.contractsDir,
-        externalDirs: config.externalDirs,
+        typesDir: config.typesDir,
         port: config.port,
-        targetUrl: config.targetUrl,
         hotReload: config.hotReload,
         cache: config.cache,
       },
     });
   });
 
-  // Swagger documentation
-  const swaggerSpec = generateOpenAPISpec(config);
-  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
-    customCss: '.swagger-ui .topbar { display: none }',
-    customSiteTitle: 'TS Mock Proxy API Docs',
-  }));
+  // Swagger documentation - use app.locals.swaggerSpec for dynamic updates
+  app.use('/api-docs', swaggerUi.serve, (req: Request, res: Response, next: NextFunction) => {
+    const spec = app.locals.swaggerSpec || swaggerSpec;
+    swaggerUi.setup(spec, {
+      customCss: '.swagger-ui .topbar { display: none }',
+      customSiteTitle: 'TS Mock Proxy API Docs',
+    })(req, res, next);
+  });
 
-  // Proxy mode with fallback (if targetUrl is configured)
-  if (config.targetUrl) {
-    app.use(createProxyFallback(config));
-  }
+  // Proxy mode removed: requests are handled only by mock dynamic routes
 
   // Catch-all route for dynamic routing
   app.all('*', dynamicRouteHandler(config));
@@ -86,16 +86,7 @@ export function startServer(
   // Start the server
   const server = app.listen(config.port, () => {
     logger.server(config.port);
-    logger.info(`Contracts directory: ${config.contractsDir}`);
-
-    if (config.externalDirs && config.externalDirs.length > 0) {
-      logger.info(`External directories (${config.externalDirs.length}):`);
-      config.externalDirs.forEach(dir => logger.info(`  - ${dir}`));
-    }
-
-    if (config.targetUrl) {
-      logger.info(`Proxy target: ${config.targetUrl}`);
-    }
+    logger.info(`Types directory: ${config.typesDir}`);
 
     if (config.latency) {
       logger.info(
@@ -114,9 +105,13 @@ export function startServer(
   let watcher: FSWatcher | undefined;
 
   if (config.hotReload) {
-    const allDirs = [config.contractsDir, ...(config.externalDirs || [])];
-    watcher = startFileWatcher(allDirs, (filePath) => {
-      logger.info(`Contract updated: ${filePath}`);
+    watcher = startFileWatcher(config.typesDir, (filePath) => {
+      logger.info(`Type file updated: ${filePath}`);
+      
+      // Regenerate Swagger spec to include new endpoints
+      const newSwaggerSpec = generateOpenAPISpec(config);
+      app.locals.swaggerSpec = newSwaggerSpec;
+      logger.success('Swagger spec regenerated with updated endpoints');
     });
   }
 

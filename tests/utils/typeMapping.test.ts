@@ -19,11 +19,13 @@ describe('typeMapping', () => {
     // Create test TypeScript files
     fs.writeFileSync(
       path.join(testDir, 'user.ts'),
-      `export interface User {
+      `// @endpoint
+export interface User {
   id: number;
   name: string;
 }
 
+// @endpoint
 export interface UserProfile {
   userId: number;
   bio: string;
@@ -32,7 +34,8 @@ export interface UserProfile {
 
     fs.writeFileSync(
       path.join(testDir, 'product.ts'),
-      `export interface Product {
+      `// @endpoint
+export interface Product {
   id: number;
   title: string;
 }`
@@ -46,7 +49,8 @@ export interface UserProfile {
 
     fs.writeFileSync(
       path.join(subDir, 'order.ts'),
-      `export interface Order {
+      `// @endpoint
+export interface Order {
   id: number;
   total: number;
 }`
@@ -109,17 +113,19 @@ export interface UserProfile {
       const userFile = path.join(testDir, 'user.ts');
       const interfaces = extractInterfaceNames(userFile);
 
-      expect(interfaces).toContain('User');
-      expect(interfaces).toContain('UserProfile');
       expect(interfaces.length).toBe(2);
+      expect(interfaces.some((i) => i.name === 'User')).toBe(true);
+      expect(interfaces.some((i) => i.name === 'UserProfile')).toBe(true);
+      expect(interfaces.every((i) => i.hasEndpointFlag === true)).toBe(true);
     });
 
     it('should extract interface from simple file', () => {
       const productFile = path.join(testDir, 'product.ts');
       const interfaces = extractInterfaceNames(productFile);
 
-      expect(interfaces).toContain('Product');
       expect(interfaces.length).toBe(1);
+      expect(interfaces[0]!.name).toBe('Product');
+      expect(interfaces[0]!.hasEndpointFlag).toBe(true);
     });
 
     it('should return empty array for file without interfaces', () => {
@@ -128,11 +134,34 @@ export interface UserProfile {
 
       expect(interfaces).toEqual([]);
     });
+
+    it('should detect endpoint flags correctly', () => {
+      const testFile = path.join(testDir, 'flagged-test.ts');
+      fs.writeFileSync(
+        testFile,
+        `// @endpoint
+export interface WithFlag {
+  id: number;
+}
+
+export interface WithoutFlag {
+  id: number;
+}`
+      );
+
+      const interfaces = extractInterfaceNames(testFile);
+
+      expect(interfaces.length).toBe(2);
+      expect(interfaces.find((i) => i.name === 'WithFlag')?.hasEndpointFlag).toBe(true);
+      expect(interfaces.find((i) => i.name === 'WithoutFlag')?.hasEndpointFlag).toBe(false);
+
+      fs.rmSync(testFile);
+    });
   });
 
   describe('buildTypeMap', () => {
     it('should build type map from directory', () => {
-      const typeMap = buildTypeMap([testDir]);
+      const typeMap = buildTypeMap(testDir);
 
       expect(typeMap.has('User')).toBe(true);
       expect(typeMap.has('UserProfile')).toBe(true);
@@ -141,53 +170,39 @@ export interface UserProfile {
     });
 
     it('should map types to their file paths', () => {
-      const typeMap = buildTypeMap([testDir]);
+      const typeMap = buildTypeMap(testDir);
       const userPath = typeMap.get('User');
 
       expect(userPath).toBeDefined();
       expect(userPath).toContain('user.ts');
     });
 
-    it('should handle multiple directories', () => {
-      const typeMap = buildTypeMap([testDir, path.join(testDir, 'models')]);
-
-      expect(typeMap.has('User')).toBe(true);
-      expect(typeMap.has('Order')).toBe(true);
-    });
-
-    it('should prioritize first occurrence for duplicate types', () => {
-      // Create two separate directories at same level
-      const dir1 = path.join(__dirname, 'test-priority-1');
-      const dir2 = path.join(__dirname, 'test-priority-2');
-
-      fs.mkdirSync(dir1, { recursive: true });
-      fs.mkdirSync(dir2, { recursive: true });
-
+    it('should only include interfaces marked with // @endpoint', () => {
+      const testFile = path.join(testDir, 'endpoint-filter-test.ts');
       fs.writeFileSync(
-        path.join(dir1, 'duplicate.ts'),
-        'export interface DuplicateType { first: true; }'
+        testFile,
+        `// @endpoint
+export interface Exposed {
+  id: number;
+}
+
+export interface Hidden {
+  id: number;
+}`
       );
 
-      fs.writeFileSync(
-        path.join(dir2, 'duplicate.ts'),
-        'export interface DuplicateType { second: true; }'
-      );
+      const typeMap = buildTypeMap(testDir);
 
-      // When buildTypeMap is called with dir1 first, it should prioritize dir1
-      const typeMap = buildTypeMap([dir1, dir2]);
-      const duplicatePath = typeMap.get('DuplicateType');
+      expect(typeMap.has('Exposed')).toBe(true);
+      expect(typeMap.has('Hidden')).toBe(false);
 
-      // Should use the first occurrence (from dir1)
-      expect(duplicatePath).toBe(path.join(dir1, 'duplicate.ts'));
-
-      fs.rmSync(dir1, { recursive: true, force: true });
-      fs.rmSync(dir2, { recursive: true, force: true });
+      fs.rmSync(testFile);
     });
   });
 
   describe('findTypeForUrl', () => {
     it('should find type for plural URL', () => {
-      const result = findTypeForUrl('/api/users', [testDir]);
+      const result = findTypeForUrl('/api/users', testDir);
 
       expect(result).not.toBeNull();
       expect(result?.typeName).toBe('User');
@@ -196,7 +211,7 @@ export interface UserProfile {
     });
 
     it('should find type for singular URL', () => {
-      const result = findTypeForUrl('/api/product', [testDir]);
+      const result = findTypeForUrl('/api/product', testDir);
 
       expect(result).not.toBeNull();
       expect(result?.typeName).toBe('Product');
@@ -205,13 +220,13 @@ export interface UserProfile {
     });
 
     it('should return null for non-existent type', () => {
-      const result = findTypeForUrl('/api/non-existent', [testDir]);
+      const result = findTypeForUrl('/api/non-existent', testDir);
 
       expect(result).toBeNull();
     });
 
     it('should handle nested URLs', () => {
-      const result = findTypeForUrl('/api/v1/orders', [testDir]);
+      const result = findTypeForUrl('/api/v1/orders', testDir);
 
       expect(result).not.toBeNull();
       expect(result?.typeName).toBe('Order');
@@ -219,7 +234,7 @@ export interface UserProfile {
     });
 
     it('should handle hyphenated URLs', () => {
-      const result = findTypeForUrl('/api/user-profiles', [testDir]);
+      const result = findTypeForUrl('/api/user-profiles', testDir);
 
       expect(result).not.toBeNull();
       expect(result?.typeName).toBe('UserProfile');
