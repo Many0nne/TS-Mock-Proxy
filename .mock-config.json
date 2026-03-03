@@ -1,0 +1,7 @@
+{
+  "typesDir": "..\\testfront\\types",
+  "port": 8080,
+  "hotReload": true,
+  "cache": true,
+  "verbose": false
+}

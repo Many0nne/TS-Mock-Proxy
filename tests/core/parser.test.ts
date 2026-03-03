@@ -107,6 +107,48 @@ export interface Product {
     });
   });
 
+  describe('generateMockFromInterface with JSDoc constraints', () => {
+    const constrainedFile = path.join(testDir, 'constrained-interface.ts');
+
+    beforeAll(() => {
+      fs.writeFileSync(
+        constrainedFile,
+        `export interface Badge {
+  /** @maxLength 10 */
+  label: string;
+  /** @min 1 @max 5 */
+  level: number;
+  /** @enum ACTIVE,INACTIVE,PENDING */
+  status: string;
+}`
+      );
+    });
+
+    it('should respect @maxLength on string fields', () => {
+      for (let i = 0; i < 5; i++) {
+        const mock = generateMockFromInterface(constrainedFile, 'Badge');
+        expect(typeof mock.label).toBe('string');
+        expect((mock.label as string).length).toBeLessThanOrEqual(10);
+      }
+    });
+
+    it('should respect @min and @max on number fields', () => {
+      for (let i = 0; i < 5; i++) {
+        const mock = generateMockFromInterface(constrainedFile, 'Badge');
+        expect(typeof mock.level).toBe('number');
+        expect(mock.level).toBeGreaterThanOrEqual(1);
+        expect(mock.level).toBeLessThanOrEqual(5);
+      }
+    });
+
+    it('should respect @enum on string fields', () => {
+      for (let i = 0; i < 5; i++) {
+        const mock = generateMockFromInterface(constrainedFile, 'Badge');
+        expect(['ACTIVE', 'INACTIVE', 'PENDING']).toContain(mock.status);
+      }
+    });
+  });
+
   describe('generateMockArray', () => {
     it('should generate array of mocks', () => {
       const mocks = generateMockArray(testFile, 'User');

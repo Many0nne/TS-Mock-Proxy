@@ -113,12 +113,93 @@ All endpoints are documented with examples and you can test them directly from y
 
 ---
 
+## 🎯 Field Constraints with JSDoc Annotations
+
+Add validation constraints to your interfaces using JSDoc annotations. This ensures generated mock data follows your API rules.
+
+### Supported Constraints
+
+| Annotation | Type | Example | Description |
+|---|---|---|---|
+| `@minLength` | string | `@minLength 3` | Minimum string length |
+| `@maxLength` | string | `@maxLength 10` | Maximum string length |
+| `@pattern` | string | `@pattern ^[a-z]+$` | Regex pattern validation |
+| `@min` | number | `@min 1` | Minimum numeric value |
+| `@max` | number | `@max 100` | Maximum numeric value |
+| `@enum` | any | `@enum ACTIVE,INACTIVE,PENDING` | Allowed values (comma-separated) |
+
+### Usage Examples
+
+```typescript
+// @endpoint
+export interface Badge {
+  /** @maxLength 10 */
+  label: string;
+  
+  /** @min 1 @max 5 */
+  level: number;
+  
+  /** @enum ACTIVE,INACTIVE,PENDING */
+  status: string;
+}
+```
+
+Response:
+```json
+{ "label": "New", "level": 3, "status": "ACTIVE" }
+```
+
+### More Examples
+
+```typescript
+// @endpoint
+export interface User {
+  id: number;
+  
+  /** @minLength 3 @maxLength 20 */
+  username: string;
+  
+  /** @pattern ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ */
+  email: string;
+  
+  /** @min 18 @max 120 */
+  age: number;
+}
+
+// @endpoint
+export interface Product {
+  /** @maxLength 50 */
+  title: string;
+  
+  /** @minLength 10 @maxLength 500 */
+  description: string;
+  
+  /** @min 0.01 @max 999999.99 */
+  price: number;
+  
+  /** @enum DRAFT,PUBLISHED,ARCHIVED */
+  status: string;
+}
+```
+
+### How It Works
+
+1. Constraints are extracted from JSDoc comments when generating mock data
+2. Intermock generates base mock data
+3. The constraint resolver applies your rules to ensure valid data
+4. **No validation** - constraints are applied, not enforced. Mocks always return valid data.
+
+
+
 ## Available Commands
 
 - `npm run dev` - Start development server
 - `npm run build` - Compile TypeScript  
 - `npm start` - Start production server
-- `npm test` - Run tests
+- `npm test` - Run all tests
+- `npm test -- constraintExtractor.test.ts` - Test constraint JSDoc extraction
+- `npm test -- constraintValidator.test.ts` - Test constraint validation
+- `npm test -- constrainedGenerator.test.ts` - Test constrained data generation
 
 ---
 
@@ -129,7 +210,13 @@ The server maps URL paths to TypeScript interfaces by converting the route to Pa
 - `/user` → looks for `User` interface → returns single object
 - `/users` → looks for `User` interface → returns array of 3-10 objects
 
-Only interfaces marked with `// @endpoint` are exposed. The server uses Intermock to parse TypeScript AST and Faker to generate realistic test data. Schemas are cached in memory for performance.
+Only interfaces marked with `// @endpoint` are exposed. The server uses Intermock to parse TypeScript AST and Faker to generate realistic test data. 
+
+**Constraint Processing**: When a request is made, the system:
+1. Extracts JSDoc annotations from each field in the interface
+2. Generates initial mock data using Intermock/Faker
+3. Applies constraints (length, range, enum, pattern) to ensure valid test data
+4. Caches schemas in memory for performance
 
 ---
 

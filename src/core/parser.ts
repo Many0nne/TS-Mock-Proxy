@@ -1,6 +1,8 @@
 import * as intermock from 'intermock';
 import * as fs from 'fs';
 import { MockGenerationOptions } from '../types/config';
+import { extractConstraints } from '../utils/constraintExtractor';
+import { applyConstraintsToMock } from './constrainedGenerator';
 
 /**
  * Generates mock data from a TypeScript interface
@@ -29,10 +31,26 @@ export function generateMockFromInterface(
     });
 
     // Intermock returns an object with the interface name as key
-    const mockData = output[interfaceName as keyof typeof output];
+    let mockData = output[interfaceName as keyof typeof output];
 
     if (!mockData) {
       throw new Error(`Interface "${interfaceName}" not found in file ${filePath}`);
+    }
+
+    // Extract and apply JSDoc constraints from the interface
+    try {
+      const constraints = extractConstraints(filePath, interfaceName);
+      if (Object.keys(constraints).length > 0) {
+        mockData = applyConstraintsToMock(
+          mockData as Record<string, unknown>,
+          constraints
+        );
+      }
+    } catch (constraintError) {
+      // Log constraint extraction errors but don't fail the entire generation
+      console.warn(
+        `Warning: Failed to extract constraints for ${interfaceName}: ${constraintError instanceof Error ? constraintError.message : String(constraintError)}`
+      );
     }
 
     return mockData as Record<string, unknown>;
