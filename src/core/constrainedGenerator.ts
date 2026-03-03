@@ -35,48 +35,44 @@ export function generateConstrainedString(constraints: FieldConstraint[]): strin
 export function generateConstrainedNumber(constraints: FieldConstraint[]): number {
   const enumValues = getEnumValues(constraints);
   if (enumValues && enumValues.length > 0) {
-    return parseInt(faker.helpers.arrayElement(enumValues), 10);
+    const numericValues = enumValues.map((v) => parseFloat(v)).filter((v) => !isNaN(v));
+    if (numericValues.length > 0) {
+      return faker.helpers.arrayElement(numericValues);
+    }
   }
 
   const { min, max } = getNumberBounds(constraints);
+  // Use float generation when either bound is a decimal
+  if (min % 1 !== 0 || max % 1 !== 0) {
+    return faker.number.float({ min, max });
+  }
   return faker.number.int({ min, max });
 }
 
 /**
- * Generates a string that matches a regex pattern
+ * Generates a string that matches a regex pattern.
+ * Uses heuristics for common patterns; falls back to alphanumeric for others.
  */
 function generateStringMatchingPattern(pattern: RegExp): string {
-  // This is a simplified approach - for complex patterns, we generate a fallback
-  try {
-    const source = pattern.source;
+  const source = pattern.source;
 
-    // Handle common patterns
-    if (source.includes('[a-z]') || source === '[a-z]*') {
-      return faker.string.alpha({ length: 10 });
-    }
-    if (source.includes('[0-9]') || source === '[0-9]*') {
-      return faker.string.numeric({ length: 10 });
-    }
-    if (source.includes('[a-zA-Z0-9]')) {
-      return faker.string.alphanumeric({ length: 10 });
-    }
-
-    // For email-like patterns
-    if (source.includes('@') || source === '^[^@]+@[^@]+\\.[^@]+$') {
-      return faker.internet.email();
-    }
-
-    // For URL-like patterns
-    if (source.includes('http') || source.includes('://')) {
-      return faker.internet.url();
-    }
-
-    // Fallback: generate alphanumeric string
-    return faker.string.alphanumeric(10);
-  } catch (error) {
-    // Fallback for complex patterns
-    return faker.string.alphanumeric(10);
+  if (source.includes('[a-z]') || source === '[a-z]*') {
+    return faker.string.alpha({ length: 10 });
   }
+  if (source.includes('[0-9]') || source === '[0-9]*') {
+    return faker.string.numeric({ length: 10 });
+  }
+  if (source.includes('[a-zA-Z0-9]')) {
+    return faker.string.alphanumeric({ length: 10 });
+  }
+  if (source.includes('@') || source === '^[^@]+@[^@]+\\.[^@]+$') {
+    return faker.internet.email();
+  }
+  if (source.includes('http') || source.includes('://')) {
+    return faker.internet.url();
+  }
+
+  return faker.string.alphanumeric(10);
 }
 
 /**
@@ -86,7 +82,7 @@ function generateStringMatchingPattern(pattern: RegExp): string {
 export function applyConstraintsToMock(
   mockData: Record<string, unknown>,
   fieldConstraints: FieldConstraints,
-  _knownTypes: Record<string, string> = {}
+  knownTypes: Record<string, string> = {}
 ): Record<string, unknown> {
   const constrained = { ...mockData };
 
@@ -95,33 +91,35 @@ export function applyConstraintsToMock(
       const currentValue = constrained[fieldName];
       const fieldConstraintsList = constraints as FieldConstraint[];
 
-      // Determine the type of constraint to apply
-      if (fieldConstraintsList.some((c) => c.type.includes('Length') || c.type === 'pattern')) {
-        // String-like constraint
-        constrained[fieldName] = generateConstrainedString(fieldConstraintsList);
-      } else if (fieldConstraintsList.some((c) => c.type === 'min' || c.type === 'max')) {
-        // Number-like constraint
-        if (typeof currentValue !== 'number') {
-          constrained[fieldName] = generateConstrainedNumber(fieldConstraintsList);
-        } else {
-          // Validate and regenerate if needed
-          const value = currentValue as number;
-          const minConstraint = fieldConstraintsList.find((c) => c.type === 'min');
-          const maxConstraint = fieldConstraintsList.find((c) => c.type === 'max');
+      // Determine the field type from knownTypes or the actual runtime value
+      const actualType = knownTypes[fieldName] ?? typeof currentValue;
+      const isNumeric = actualType === 'number';
 
-          const min = minConstraint ? (minConstraint.value as number) : value;
-          const max = maxConstraint ? (maxConstraint.value as number) : value;
-
-          if (value < min || value > max) {
-            constrained[fieldName] = generateConstrainedNumber(fieldConstraintsList);
-          }
-        }
-      } else if (fieldConstraintsList.some((c) => c.type === 'enum')) {
-        // Enum constraint
+      if (fieldConstraintsList.some((c) => c.type === 'enum')) {
         const enumValues = getEnumValues(fieldConstraintsList);
         if (enumValues && enumValues.length > 0) {
-          constrained[fieldName] = faker.helpers.arrayElement(enumValues);
+          if (isNumeric) {
+            const numericValues = enumValues.map((v) => parseFloat(v)).filter((v) => !isNaN(v));
+            constrained[fieldName] =
+              numericValues.length > 0
+                ? faker.helpers.arrayElement(numericValues)
+                : faker.helpers.arrayElement(enumValues);
+          } else {
+            constrained[fieldName] = faker.helpers.arrayElement(enumValues);
+          }
         }
+      } else if (isNumeric) {
+        const value = currentValue as number;
+        const minConstraint = fieldConstraintsList.find((c) => c.type === 'min');
+        const maxConstraint = fieldConstraintsList.find((c) => c.type === 'max');
+        const min = minConstraint ? (minConstraint.value as number) : value;
+        const max = maxConstraint ? (maxConstraint.value as number) : value;
+
+        if (value < min || value > max) {
+          constrained[fieldName] = generateConstrainedNumber(fieldConstraintsList);
+        }
+      } else {
+        constrained[fieldName] = generateConstrainedString(fieldConstraintsList);
       }
     }
   }
@@ -149,12 +147,13 @@ export function generateFieldValue(
   if (hasEnumConstraints) {
     const enumValues = getEnumValues(constraints);
     if (enumValues && enumValues.length > 0) {
-      // Try to convert to appropriate type
-      const value = faker.helpers.arrayElement(enumValues);
       if (fieldType === 'number') {
-        return parseInt(value, 10);
+        const numericValues = enumValues.map((v) => parseFloat(v)).filter((v) => !isNaN(v));
+        if (numericValues.length > 0) {
+          return faker.helpers.arrayElement(numericValues);
+        }
       }
-      return value;
+      return faker.helpers.arrayElement(enumValues);
     }
   }
 

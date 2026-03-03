@@ -62,7 +62,11 @@ function visit(
     // Process each property of the interface
     node.members.forEach((member) => {
       if (ts.isPropertySignature(member) && member.name) {
-        const propName = member.name.getText();
+        // Use .text for identifiers/string literals to avoid wrapping quotes
+        const propName =
+          ts.isIdentifier(member.name) || ts.isStringLiteral(member.name)
+            ? member.name.text
+            : member.name.getText();
         const fieldConstraints = extractJSDocConstraints(member, sourceFile);
 
         if (fieldConstraints.length > 0) {
@@ -99,7 +103,7 @@ function extractJSDocConstraints(node: ts.PropertySignature, sourceFile?: ts.Sou
       });
     } else if ('tagName' in doc) {
       // It's a JSDocTag directly
-      const constraint = parseJSDocTag(doc as any, sourceFile);
+      const constraint = parseJSDocTag(doc as ts.JSDocTag, sourceFile);
       if (constraint) {
         constraints.push(constraint);
       }
@@ -113,87 +117,63 @@ function extractJSDocConstraints(node: ts.PropertySignature, sourceFile?: ts.Sou
  * Parses a single JSDoc tag and returns the constraint
  */
 function parseJSDocTag(tag: ts.JSDocTag, sourceFile?: ts.SourceFile): FieldConstraint | null {
-  const tagName = tag.tagName?.text || (tag as any).tagName?.escapedText;
-  let comment = (tag as any).comment;
-
+  const tagName = tag.tagName.text;
   if (!tagName) return null;
 
-  // For enum tags, always extract from source file because TypeScript parser
-  // treats the first enum value as a type annotation
+  // Resolve the comment to a plain string.
+  // For @enum, always read from source text because the TS parser treats the
+  // first enum value as a type annotation and truncates the rest.
+  let commentStr: string | undefined;
   if (tagName === 'enum' && sourceFile) {
     const tagText = tag.getFullText(sourceFile);
-    // Match everything after @enum and optional whitespace, until we hit */ or @ or end
     const match = tagText.match(/@enum\s+([^*@]+?)(?=\s*(?:\*\/|@|$))/);
-    if (match && match[1]) {
-      comment = match[1].trim();
-    }
+    commentStr = match?.[1]?.trim();
   } else {
-    // Handle comment that might be an array of nodes or a string
-    if (Array.isArray(comment)) {
-      comment = comment.map((node: any) => node.text || node).join('');
-    } else if (typeof comment === 'object' && comment && 'text' in comment) {
-      comment = (comment as any).text;
+    const raw = tag.comment;
+    // Normalize NodeArray<JSDocComment> to a plain string
+    if (Array.isArray(raw)) {
+      commentStr = (raw as ts.NodeArray<ts.JSDocComment>).map((node) => node.text).join('');
+    } else if (typeof raw === 'string') {
+      commentStr = raw;
     }
 
-    // If comment is still empty or not a string, try to extract from source file
-    if (!comment || typeof comment !== 'string') {
-      if (sourceFile) {
-        // Get the text of the entire tag and extract the value part
-        const tagText = tag.getFullText(sourceFile);
-        // Match everything after @tagName and optional whitespace, until we hit */ or @ or end
-        const match = tagText.match(new RegExp(`@${tagName}\\s+([^\\*@]+?)(?=\\s*(?:\\*\\/|@|$))`));
-        if (match && match[1]) {
-          comment = match[1].trim();
-        } else {
-          comment = '';
-        }
-      } else {
-        comment = '';
-      }
+    // Fall back to extracting from source text when comment is empty
+    if (!commentStr && sourceFile) {
+      const tagText = tag.getFullText(sourceFile);
+      const match = tagText.match(new RegExp(`@${tagName}\\s+([^\\*@]+?)(?=\\s*(?:\\*\\/|@|$))`));
+      commentStr = match?.[1]?.trim() ?? '';
     }
   }
 
   switch (tagName) {
     case 'minLength': {
-      const value = extractNumericValue(comment);
-      if (value !== null) {
-        return { type: 'minLength', value };
-      }
+      const value = extractNumericValue(commentStr);
+      if (value !== null) return { type: 'minLength', value };
       break;
     }
     case 'maxLength': {
-      const value = extractNumericValue(comment);
-      if (value !== null) {
-        return { type: 'maxLength', value };
-      }
+      const value = extractNumericValue(commentStr);
+      if (value !== null) return { type: 'maxLength', value };
       break;
     }
     case 'min': {
-      const value = extractNumericValue(comment);
-      if (value !== null) {
-        return { type: 'min', value };
-      }
+      const value = extractNumericValue(commentStr);
+      if (value !== null) return { type: 'min', value };
       break;
     }
     case 'max': {
-      const value = extractNumericValue(comment);
-      if (value !== null) {
-        return { type: 'max', value };
-      }
+      const value = extractNumericValue(commentStr);
+      if (value !== null) return { type: 'max', value };
       break;
     }
     case 'pattern': {
-      const value = extractStringValue(comment);
-      if (value) {
-        return { type: 'pattern', value };
-      }
+      const value = extractStringValue(commentStr);
+      if (value) return { type: 'pattern', value };
       break;
     }
     case 'enum': {
-      const values = extractEnumValues(comment);
-      if (values.length > 0) {
-        return { type: 'enum', value: values };
-      }
+      const values = extractEnumValues(commentStr);
+      if (values.length > 0) return { type: 'enum', value: values };
       break;
     }
   }
@@ -207,9 +187,9 @@ function parseJSDocTag(tag: ts.JSDocTag, sourceFile?: ts.SourceFile): FieldConst
 function extractNumericValue(comment: string | undefined): number | null {
   if (!comment) return null;
 
-  const match = comment.match(/\d+/);
+  const match = comment.match(/-?\d+(\.\d+)?/);
   if (match) {
-    return parseInt(match[0], 10);
+    return parseFloat(match[0]);
   }
 
   return null;
@@ -238,17 +218,10 @@ function extractStringValue(comment: string | undefined): string | null {
 function extractEnumValues(comment: string | undefined): string[] {
   if (!comment) return [];
 
-  // Remove leading @enum tag if present
-  let cleanComment = comment.trim();
-  if (cleanComment.startsWith('@enum')) {
-    cleanComment = cleanComment.substring(5).trim();
-  }
-
   // Split by comma and trim each value
-  const result = cleanComment
+  return comment
+    .trim()
     .split(',')
     .map((v) => v.trim())
     .filter((v) => v.length > 0);
-
-  return result;
 }
