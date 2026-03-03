@@ -113,7 +113,7 @@ All endpoints are documented with examples and you can test them directly from y
 
 ---
 
-## 🎯 Field Constraints with JSDoc Annotations
+## Field Constraints with JSDoc Annotations
 
 Add validation constraints to your interfaces using JSDoc annotations. This ensures generated mock data follows your API rules.
 
@@ -159,7 +159,7 @@ export interface User {
   /** @minLength 3 @maxLength 20 */
   username: string;
   
-  /** @pattern ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ */
+  // not needed, email is one of the types handled by intermock
   email: string;
   
   /** @min 18 @max 120 */
