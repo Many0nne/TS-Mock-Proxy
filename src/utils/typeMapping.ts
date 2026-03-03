@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { RouteTypeMapping, InterfaceMetadata } from '../types/config';
-import { parseUrlToType } from './pluralize';
+import { parseUrlToType, toPascalCase, extractLastSegment } from './pluralize';
 
 /**
  * Recursively scans a directory to find all .ts files
@@ -137,9 +137,23 @@ export function findTypeForUrl(
   url: string,
   directory: string
 ): RouteTypeMapping | null {
-  const { typeName, isArray } = parseUrlToType(url);
   const typeMap = buildTypeMap(directory);
+  const lastSegment = extractLastSegment(url);
 
+  // If the user explicitly defined an interface matching this URL segment (e.g. `Users`
+  // for `/users`), prefer it over the auto-plural route derived from a singular interface.
+  const directTypeName = toPascalCase(lastSegment);
+  const directFilePath = typeMap.get(directTypeName);
+  if (directFilePath) {
+    return {
+      typeName: directTypeName,
+      isArray: false,
+      filePath: directFilePath,
+    };
+  }
+
+  // Fall back to singularization (e.g. `/users` → `User` with isArray: true)
+  const { typeName, isArray } = parseUrlToType(url);
   const filePath = typeMap.get(typeName);
 
   if (!filePath) {

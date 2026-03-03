@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import { ServerConfig } from '../types/config';
 import { buildTypeMap } from '../utils/typeMapping';
 import pluralize from 'pluralize';
+import { toPascalCase } from '../utils/pluralize';
 
 interface OpenAPISchema {
   type: string;
@@ -147,8 +148,15 @@ export function generateOpenAPISpec(config: ServerConfig): Record<string, unknow
       properties,
     };
 
-    // Generate path for array endpoint
+    // Generate path for array endpoint — skip if the user explicitly defined a
+    // plural interface for this path (e.g. skip auto-plural for `User` when `Users` exists).
     const arrayPath = interfaceNameToPath(interfaceName);
+    const pluralSegment = arrayPath.slice(1); // e.g. "users"
+    const explicitPluralTypeName = toPascalCase(pluralSegment); // e.g. "Users"
+    const hasExplicitPlural =
+      explicitPluralTypeName !== interfaceName && typeMap.has(explicitPluralTypeName);
+
+    if (!hasExplicitPlural) {
     paths[arrayPath] = {
       get: {
         summary: `Get all ${pluralize(interfaceName)}`,
@@ -184,6 +192,7 @@ export function generateOpenAPISpec(config: ServerConfig): Record<string, unknow
         },
       },
     };
+    }
 
     // Generate path for single item endpoint
     const singularPath = `/${interfaceName.toLowerCase()}`;
