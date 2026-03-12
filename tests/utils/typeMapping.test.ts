@@ -56,6 +56,11 @@ export interface Order {
 }`
     );
 
+    fs.writeFileSync(
+      path.join(testDir, 'post.ts'),
+      `// @endpoint\nexport interface Post {\n  id: number;\n  title: string;\n}\n`
+    );
+
     // Create a file without exported interfaces
     fs.writeFileSync(
       path.join(testDir, 'helper.ts'),
@@ -210,13 +215,9 @@ export interface Hidden {
       expect(result?.filePath).toContain('user.ts');
     });
 
-    it('should find type for singular URL', () => {
+    it('should return null for singular URL (not a valid REST pattern)', () => {
       const result = findTypeForUrl('/api/product', testDir);
-
-      expect(result).not.toBeNull();
-      expect(result?.typeName).toBe('Product');
-      expect(result?.isArray).toBe(false);
-      expect(result?.filePath).toContain('product.ts');
+      expect(result).toBeNull();
     });
 
     it('should return null for non-existent type', () => {
@@ -239,6 +240,46 @@ export interface Hidden {
       expect(result).not.toBeNull();
       expect(result?.typeName).toBe('UserProfile');
       expect(result?.isArray).toBe(true);
+    });
+
+    it('should return null for /user (singular)', () => {
+      expect(findTypeForUrl('/user', testDir)).toBeNull();
+    });
+
+    it('should return null for /user/123 (singular collection name)', () => {
+      expect(findTypeForUrl('/user/123', testDir)).toBeNull();
+    });
+
+    it('should return null for /123/users (starts with ID)', () => {
+      expect(findTypeForUrl('/123/users', testDir)).toBeNull();
+    });
+
+    it('should resolve /users/123 to single User', () => {
+      const r = findTypeForUrl('/users/123', testDir);
+      expect(r?.typeName).toBe('User');
+      expect(r?.isArray).toBe(false);
+    });
+
+    it('should resolve /users/{uuid} to single User', () => {
+      const r = findTypeForUrl('/users/550e8400-e29b-41d4-a716-446655440000', testDir);
+      expect(r?.typeName).toBe('User');
+      expect(r?.isArray).toBe(false);
+    });
+
+    it('should resolve /users/123/posts to array of Post', () => {
+      const r = findTypeForUrl('/users/123/posts', testDir);
+      expect(r?.typeName).toBe('Post');
+      expect(r?.isArray).toBe(true);
+    });
+
+    it('should return null for /users/123/posts/456 (nested single not supported)', () => {
+      expect(findTypeForUrl('/users/123/posts/456', testDir)).toBeNull();
+    });
+
+    it('should resolve /api/v1/users/123 to single User', () => {
+      const r = findTypeForUrl('/api/v1/users/123', testDir);
+      expect(r?.typeName).toBe('User');
+      expect(r?.isArray).toBe(false);
     });
   });
 });

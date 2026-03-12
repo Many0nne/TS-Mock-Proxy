@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { RouteTypeMapping, InterfaceMetadata } from '../types/config';
-import { parseUrlToType, toPascalCase, extractLastSegment } from './pluralize';
+import { parseUrlSegments, isIdSegment, urlSegmentToTypeName } from './pluralize';
 
 /**
  * Recursively scans a directory to find all .ts files
@@ -138,31 +138,38 @@ export function findTypeForUrl(
   directory: string
 ): RouteTypeMapping | null {
   const typeMap = buildTypeMap(directory);
-  const lastSegment = extractLastSegment(url);
+  const segments = parseUrlSegments(url);
+  const kinds = segments.map(s => isIdSegment(s) ? 'id' : 'col');
 
-  // If the user explicitly defined an interface matching this URL segment (e.g. `Users`
-  // for `/users`), prefer it over the auto-plural route derived from a singular interface.
-  const directTypeName = toPascalCase(lastSegment);
-  const directFilePath = typeMap.get(directTypeName);
-  if (directFilePath) {
-    return {
-      typeName: directTypeName,
-      isArray: false,
-      filePath: directFilePath,
-    };
+  // Reject URLs starting with an ID
+  if (kinds.length > 0 && kinds[0] === 'id') return null;
+
+  const shape = kinds.join('-');
+
+  // Pattern: /collection → array (plural collection names only)
+  if (shape === 'col') {
+    const { typeName, isArray } = urlSegmentToTypeName(segments[0]!);
+    if (!isArray) return null; // reject singular collection names (e.g. /user)
+    const filePath = typeMap.get(typeName);
+    return filePath ? { typeName, isArray: true, filePath } : null;
   }
 
-  // Fall back to singularization (e.g. `/users` → `User` with isArray: true)
-  const { typeName, isArray } = parseUrlToType(url);
-  const filePath = typeMap.get(typeName);
-
-  if (!filePath) {
-    return null;
+  // Pattern: /collection/{id} → single (plural collection names only)
+  if (shape === 'col-id') {
+    const { typeName, isArray } = urlSegmentToTypeName(segments[0]!);
+    if (!isArray) return null; // reject singular collection names (e.g. /user/123)
+    const filePath = typeMap.get(typeName);
+    return filePath ? { typeName, isArray: false, filePath } : null;
   }
 
-  return {
-    typeName,
-    isArray,
-    filePath,
-  };
+  // Pattern: /collection/{id}/sub-collection → array (parent-scoped)
+  if (shape === 'col-id-col') {
+    const { typeName, isArray } = urlSegmentToTypeName(segments[2]!);
+    if (!isArray) return null; // reject singular sub-collection names
+    const filePath = typeMap.get(typeName);
+    return filePath ? { typeName, isArray: true, filePath } : null;
+  }
+
+  // Everything else (col-id-col-id, col-col, etc.) → 404
+  return null;
 }

@@ -91,15 +91,36 @@ Options:
 
 **Step 3: Call your API**
 
-```bash
-# Single object
-curl http://localhost:8080/user
-# → {"id": 482, "name": "John Doe", "email": "john.d@gmail.com", "role": "admin"}
+The server enforces idiomatic REST URL patterns:
 
-# Array of objects (plural) — with pagination metadata
+| URL | Result |
+|---|---|
+| `GET /users` | Array of `User` (paginated) |
+| `GET /users/123` | Single `User` |
+| `GET /users/{uuid}` | Single `User` |
+| `GET /users/123/posts` | Array of `Post` (if `Post` is defined) |
+| `GET /user` | 404 — singular collection names are rejected |
+| `GET /users/123/posts/456` | 404 — nested single-item not supported |
+
+```bash
+# List (plural URL) — with pagination metadata
 curl http://localhost:8080/users
 # → {"data": [...], "meta": {"total": 100, "page": 1, "pageSize": 20, "totalPages": 5}}
+
+# Single item by numeric ID
+curl http://localhost:8080/users/1
+# → {"id": 482, "name": "John Doe", "email": "john.d@gmail.com", "role": "admin"}
+
+# Single item by UUID
+curl http://localhost:8080/users/550e8400-e29b-41d4-a716-446655440000
+# → {"id": 482, "name": "John Doe", ...}
+
+# Nested collection (requires Post interface with @endpoint)
+curl http://localhost:8080/users/1/posts
+# → {"data": [...], "meta": {...}}
 ```
+
+URL prefix segments `api` and `v{n}` are stripped automatically, so `/api/v1/users/1` works the same as `/users/1`.
 
 **Step 4: View API Documentation**
 
@@ -278,12 +299,18 @@ export interface Product {
 
 ## How It Works
 
-The server maps URL paths to TypeScript interfaces by converting the route to PascalCase and singularizing it. For example:
+The server enforces idiomatic REST URL patterns. URLs are parsed into segments (stripping `api` and `v{n}` prefixes) and each segment is classified as either a **collection name** or an **ID** (numeric, UUID, or MongoDB ObjectId).
 
-- `/user` → looks for `User` interface → returns single object
-- `/users` → looks for `User` interface → generates 100-item pool, applies query params, returns paginated envelope
+Supported shapes:
 
-Only interfaces marked with `// @endpoint` are exposed. The server uses Intermock to parse TypeScript AST and Faker to generate realistic test data. 
+| URL shape | Resolves to |
+|---|---|
+| `/resources` | Array of the matching interface (plural names only) |
+| `/resources/{id}` | Single instance of the matching interface |
+| `/resources/{id}/sub-resources` | Array of the sub-resource interface |
+| Anything else | 404 |
+
+Only interfaces marked with `// @endpoint` are exposed. The server uses Intermock to parse TypeScript AST and Faker to generate realistic test data.
 
 **Constraint Processing**: When a request is made, the system:
 1. Extracts JSDoc annotations from each field in the interface

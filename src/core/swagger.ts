@@ -2,7 +2,6 @@ import * as fs from 'fs';
 import { ServerConfig } from '../types/config';
 import { buildTypeMap } from '../utils/typeMapping';
 import pluralize from 'pluralize';
-import { toPascalCase } from '../utils/pluralize';
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from './queryProcessor';
 
 interface OpenAPISchema {
@@ -233,65 +232,67 @@ export function generateOpenAPISpec(config: ServerConfig): Record<string, unknow
       properties,
     };
 
-    // Generate path for array endpoint — skip if the user explicitly defined a
-    // plural interface for this path (e.g. skip auto-plural for `User` when `Users` exists).
     const arrayPath = interfaceNameToPath(interfaceName);
-    const pluralSegment = arrayPath.slice(1); // e.g. "users"
-    const explicitPluralTypeName = toPascalCase(pluralSegment); // e.g. "Users"
-    const hasExplicitPlural =
-      explicitPluralTypeName !== interfaceName && typeMap.has(explicitPluralTypeName);
+    const singlePath = `${arrayPath}/{id}`;
 
-    if (!hasExplicitPlural) {
-      paths[arrayPath] = {
-        get: {
-          summary: `List ${pluralize(interfaceName)}`,
-          description: `Returns a paginated list of \`${interfaceName}\` objects. Supports filtering, sorting, and pagination via query parameters.`,
-          parameters: buildListParameters(properties),
-          responses: {
-            '200': {
-              description: 'Successful response',
-              content: {
-                'application/json': {
-                  schema: {
-                    type: 'object',
-                    properties: {
-                      data: {
-                        type: 'array',
-                        items: { $ref: `#/components/schemas/${interfaceName}` },
-                      },
-                      meta: { $ref: '#/components/schemas/PaginationMeta' },
+    // GET /resources — paginated list
+    paths[arrayPath] = {
+      get: {
+        summary: `List ${pluralize(interfaceName)}`,
+        description: `Returns a paginated list of \`${interfaceName}\` objects. Supports filtering, sorting, and pagination via query parameters.`,
+        parameters: buildListParameters(properties),
+        responses: {
+          '200': {
+            description: 'Successful response',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    data: {
+                      type: 'array',
+                      items: { $ref: `#/components/schemas/${interfaceName}` },
                     },
+                    meta: { $ref: '#/components/schemas/PaginationMeta' },
                   },
                 },
               },
             },
-            '400': {
-              description: 'Invalid query parameters',
-              content: {
-                'application/json': {
-                  schema: { $ref: '#/components/schemas/ErrorResponse' },
-                },
+          },
+          '400': {
+            description: 'Invalid query parameters',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
               },
             },
-            '404': {
-              description: 'Type not found',
-              content: {
-                'application/json': {
-                  schema: { $ref: '#/components/schemas/ErrorResponse' },
-                },
+          },
+          '404': {
+            description: 'Type not found',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
               },
             },
           },
         },
-      };
-    }
+      },
+    };
 
-    // Generate path for single item endpoint
-    const singularPath = `/${interfaceName.toLowerCase()}`;
-    paths[singularPath] = {
+    // GET /resources/{id} — single item
+    paths[singlePath] = {
       get: {
         summary: `Get a single ${interfaceName}`,
-        description: `Returns a single \`${interfaceName}\` object`,
+        description: `Returns a single \`${interfaceName}\` object by ID`,
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            description: `ID of the ${interfaceName} (numeric, UUID, or MongoDB ObjectId)`,
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
         responses: {
           '200': {
             description: 'Successful response',

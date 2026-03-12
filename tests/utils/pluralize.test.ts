@@ -3,6 +3,8 @@ import {
   extractLastSegment,
   urlSegmentToTypeName,
   parseUrlToType,
+  isIdSegment,
+  parseUrlSegments,
 } from '../../src/utils/pluralize';
 
 describe('pluralize utils', () => {
@@ -112,5 +114,22 @@ describe('pluralize utils', () => {
       expect(result.typeName).toBe('UserProfile');
       expect(result.isArray).toBe(true);
     });
+  });
+
+  describe('isIdSegment', () => {
+    it('returns true for numeric IDs', () => { expect(isIdSegment('123')).toBe(true); });
+    it('returns true for UUID', () => { expect(isIdSegment('550e8400-e29b-41d4-a716-446655440000')).toBe(true); });
+    it('returns true for MongoDB ObjectId', () => { expect(isIdSegment('507f1f77bcf86cd799439011')).toBe(true); });
+    it('returns false for collection names', () => { expect(isIdSegment('users')).toBe(false); });
+    it('returns false for version segments', () => { expect(isIdSegment('v1')).toBe(false); });
+  });
+
+  describe('parseUrlSegments', () => {
+    it('strips api prefix', () => { expect(parseUrlSegments('/api/users')).toEqual(['users']); });
+    it('strips version prefix', () => { expect(parseUrlSegments('/v1/users')).toEqual(['users']); });
+    it('strips api + version prefix', () => { expect(parseUrlSegments('/api/v1/users')).toEqual(['users']); });
+    it('preserves ID segments', () => { expect(parseUrlSegments('/api/v1/users/123')).toEqual(['users', '123']); });
+    it('preserves nested collections', () => { expect(parseUrlSegments('/users/123/posts')).toEqual(['users', '123', 'posts']); });
+    it('handles root path', () => { expect(parseUrlSegments('/')).toEqual([]); });
   });
 });

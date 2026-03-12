@@ -36,8 +36,11 @@ TypeScript is strict (`noUnusedLocals`, `noUnusedParameters`, `noUncheckedIndexe
 **URL → Interface resolution** (`src/utils/typeMapping.ts` + `src/utils/pluralize.ts`):
 - Scans `typesDir` recursively for `.ts` files
 - Only interfaces with `// @endpoint` (or in a JSDoc block containing `@endpoint`) are exposed
-- URL last segment is converted to PascalCase; if a matching interface exists directly (e.g. `Users` for `/users`), it wins as a non-array route
-- Otherwise, the segment is singularized via the `pluralize` library (`users` → `User`) and `isArray: true` is set
+- `parseUrlSegments` strips leading `api` and `v{n}` prefix segments, then `isIdSegment` classifies each remaining segment as `col` (collection name) or `id` (numeric / UUID / MongoDB ObjectId)
+- Supported URL shapes (anything else → 404):
+  - `col` → plural collection → `isArray: true` (singular names like `/user` are rejected)
+  - `col-id` → `/{resources}/{id}` → single item, `isArray: false`
+  - `col-id-col` → `/{resources}/{id}/{sub-resources}` → `isArray: true` on the sub-resource type
 
 **Mock generation** (`src/core/parser.ts`):
 - Uses `intermock` with `isFixedMode: false` for random data
