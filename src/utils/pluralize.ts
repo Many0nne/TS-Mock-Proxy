@@ -58,3 +58,29 @@ export function parseUrlToType(url: string): {
   const lastSegment = extractLastSegment(url);
   return urlSegmentToTypeName(lastSegment);
 }
+
+/**
+ * Returns true if the segment looks like a resource ID
+ * (numeric, UUID, or MongoDB ObjectId)
+ */
+export function isIdSegment(segment: string): boolean {
+  if (/^\d+$/.test(segment)) return true;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(segment)) return true;
+  if (/^[0-9a-f]{24}$/i.test(segment)) return true;
+  return false;
+}
+
+/**
+ * Splits a URL into meaningful segments, stripping leading `api` and `v{n}` prefixes.
+ * Example: "/api/v1/users/123" -> ["users", "123"]
+ */
+export function parseUrlSegments(url: string): string[] {
+  const raw = url.split('/').filter(Boolean);
+  let start = 0;
+  while (start < raw.length) {
+    const seg = raw[start]!.toLowerCase();
+    if (seg === 'api' || /^v\d+$/i.test(raw[start]!)) start++;
+    else break;
+  }
+  return raw.slice(start);
+}
