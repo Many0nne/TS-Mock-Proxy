@@ -101,6 +101,16 @@ export function extractInterfaceNames(filePath: string): InterfaceMetadata[] {
   return metadata;
 }
 
+/** Module-level cache for the type map */
+let typeMapCache: Map<string, string> | null = null;
+
+/**
+ * Clears the type map cache so the next call to findTypeForUrl() rebuilds it.
+ */
+export function invalidateTypeMap(): void {
+  typeMapCache = null;
+}
+
 /**
  * Creates a mapping of all available types
  * Only includes interfaces marked with // @endpoint
@@ -137,7 +147,10 @@ export function findTypeForUrl(
   url: string,
   directory: string
 ): RouteTypeMapping | null {
-  const typeMap = buildTypeMap(directory);
+  if (!typeMapCache) {
+    typeMapCache = buildTypeMap(directory);
+  }
+  const typeMap = typeMapCache;
   const segments = parseUrlSegments(url);
   const kinds = segments.map(s => isIdSegment(s) ? 'id' : 'col');
 
