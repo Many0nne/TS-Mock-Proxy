@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { ServerConfig } from '../types/config';
+import { ServerConfig, ApiErrorResponse } from '../types/config';
 import { findTypeForUrl } from '../utils/typeMapping';
 import { generateMockFromInterface, generateMockArray } from './parser';
 import { schemaCache, mockDataStore } from './cache';
@@ -25,11 +25,12 @@ export function dynamicRouteHandler(config: ServerConfig) {
       if (!mapping) {
         // Type not found - return 404
         const statusCode = res.locals.forcedStatus || 404;
-        res.status(statusCode).json({
+        const notFoundError: ApiErrorResponse = {
           error: 'Type not found',
           message: `No TypeScript interface matches the URL: ${url}`,
           hint: 'Make sure you have exported an interface in your contracts directory',
-        });
+        };
+        res.status(statusCode).json(notFoundError);
         return;
       }
 

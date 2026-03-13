@@ -67,6 +67,15 @@ export interface RouteTypeMapping {
 }
 
 /**
+ * Standard error response structure returned by all routes
+ */
+export interface ApiErrorResponse {
+  error: string;
+  message: string;
+  hint?: string;
+}
+
+/**
  * Options for mock generation
  */
 export interface MockGenerationOptions {
