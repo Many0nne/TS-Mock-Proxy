@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as ts from 'typescript';
 import { ServerConfig } from '../types/config';
 import { buildTypeMap } from '../utils/typeMapping';
 import pluralize from 'pluralize';
@@ -39,37 +40,33 @@ interface OpenAPIPath {
 }
 
 /**
- * Extracts interface properties from TypeScript source code
+ * Extracts interface properties from a TypeScript file using the compiler API.
+ * Handles readonly properties, optional fields, nested objects, and generic types
+ * correctly — unlike the previous regex-based approach.
  */
 function extractInterfaceProperties(filePath: string, interfaceName: string): Record<string, OpenAPISchema> {
   const content = fs.readFileSync(filePath, 'utf-8');
-
-  // Find the interface definition
-  const interfaceRegex = new RegExp(
-    `export\\s+interface\\s+${interfaceName}\\s*{([^}]*)}`,
-    's'
-  );
-  const match = content.match(interfaceRegex);
-
-  if (!match || !match[1]) {
-    return {};
-  }
-
-  const interfaceBody = match[1];
+  const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
   const properties: Record<string, OpenAPISchema> = {};
 
-  // Parse property lines
-  const propertyRegex = /(\w+)(\?)?:\s*([^;]+);/g;
-  let propMatch;
-
-  while ((propMatch = propertyRegex.exec(interfaceBody)) !== null) {
-    const [, propName, optional, propType] = propMatch;
-    if (!propName || !propType) continue;
-
-    const cleanType = propType.trim();
-    properties[propName] = typeToOpenAPISchema(cleanType, optional === '?');
+  function visit(node: ts.Node): void {
+    if (
+      ts.isInterfaceDeclaration(node) &&
+      node.name.text === interfaceName
+    ) {
+      for (const member of node.members) {
+        if (ts.isPropertySignature(member) && ts.isIdentifier(member.name)) {
+          const propName = member.name.text;
+          const isOptional = member.questionToken !== undefined;
+          const typeStr = member.type ? member.type.getText(sourceFile) : 'unknown';
+          properties[propName] = typeToOpenAPISchema(typeStr.trim(), isOptional);
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
   }
 
+  visit(sourceFile);
   return properties;
 }
 
@@ -109,11 +106,11 @@ function typeToOpenAPISchema(tsType: string, _isOptional = false): OpenAPISchema
     case 'unknown':
       return { type: 'object' };
     default:
-      // For complex types or references, use object
-      if (baseType.includes('{')) {
+      // For complex types (nested objects or generics like Record<K,V>)
+      if (baseType.includes('{') || baseType.includes('<')) {
         return { type: 'object' };
       }
-      // For enums or other types
+      // For enums or other references
       return { type: 'string' };
   }
 }
