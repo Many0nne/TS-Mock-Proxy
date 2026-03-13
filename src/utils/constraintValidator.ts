@@ -1,4 +1,19 @@
 import { FieldConstraint } from './constraintExtractor';
+import { logger } from './logger';
+
+/**
+ * Safely compiles a regex pattern, returning null and logging a warning on invalid input.
+ */
+function safeRegExp(pattern: string): RegExp | null {
+  try {
+    return new RegExp(pattern);
+  } catch (e) {
+    logger.warn(
+      `Invalid regex pattern "${pattern}": ${e instanceof Error ? e.message : String(e)}`
+    );
+    return null;
+  }
+}
 
 /**
  * Validates a value against a single constraint
@@ -21,8 +36,8 @@ export function validateConstraint(
       return typeof value === 'number' && value <= (constraint.value as number);
 
     case 'pattern': {
-      const pattern = new RegExp(constraint.value as string);
-      return typeof value === 'string' && pattern.test(value);
+      const pattern = safeRegExp(constraint.value as string);
+      return pattern !== null && typeof value === 'string' && pattern.test(value);
     }
 
     case 'enum':
@@ -96,5 +111,5 @@ export function getEnumValues(constraints: FieldConstraint[]): string[] | null {
  */
 export function getPattern(constraints: FieldConstraint[]): RegExp | null {
   const patternConstraint = getConstraintByType(constraints, 'pattern');
-  return patternConstraint ? new RegExp(patternConstraint.value as string) : null;
+  return patternConstraint ? safeRegExp(patternConstraint.value as string) : null;
 }
