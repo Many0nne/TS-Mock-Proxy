@@ -186,16 +186,27 @@ async function handleGet(
         return;
       }
 
+      // Check write store (highest priority — reflects PUT/PATCH)
       const stored = mockDataStore.getById(mapping.typeName, filePath, urlId);
       if (stored) {
         res.status(forcedStatus || 200).json(stored);
         return;
       }
+
+      // Fall back to the seeded pool
+      const pool = mockDataStore.getPool(mapping.typeName, filePath);
+      if (pool) {
+        const poolItem = pool.find((item) => extractMockId(item) === urlId);
+        if (poolItem) {
+          res.status(forcedStatus || 200).json(poolItem);
+          return;
+        }
+      }
     }
 
     res.status(404).json({
       error: 'Not Found',
-      message: `Resource not found. Create it first with POST or PUT.`,
+      message: `Resource not found`,
     });
   }
 }

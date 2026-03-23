@@ -73,12 +73,23 @@ describe('Server integration', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // GET single item (stateful — requires prior creation)
+  // GET single item
   // ---------------------------------------------------------------------------
   describe('GET /api/users/:id', () => {
-    it('returns 404 for an unknown ID (never created)', async () => {
-      const res = await request(app).get('/api/users/99999');
+    it('returns 404 for a truly unknown ID (UUID never in pool)', async () => {
+      // UUIDs are never generated for id: number, so this will never be in the pool
+      const res = await request(app).get('/api/users/00000000-0000-0000-0000-000000000000');
       expect(res.status).toBe(404);
+    });
+
+    it('returns 200 for a pool item (seeded at startup)', async () => {
+      const listRes = await request(app).get('/api/users');
+      expect(listRes.status).toBe(200);
+      const firstId = listRes.body.data[0].id;
+
+      const getRes = await request(app).get(`/api/users/${firstId}`);
+      expect(getRes.status).toBe(200);
+      expect(getRes.body.id).toBe(firstId);
     });
 
     it('returns 200 after POST creates the resource', async () => {
