@@ -27,14 +27,23 @@ interface OpenAPIPath {
   summary: string;
   description: string;
   parameters?: OpenAPIParameter[];
+  requestBody?: {
+    required: boolean;
+    content: {
+      'application/json': {
+        schema: unknown;
+      };
+    };
+  };
   responses: {
     [statusCode: string]: {
       description: string;
-      content: {
+      content?: {
         'application/json': {
           schema: unknown;
         };
       };
+      headers?: Record<string, { schema: { type: string } }>;
     };
   };
 }
@@ -232,8 +241,27 @@ export function generateOpenAPISpec(config: ServerConfig): Record<string, unknow
     const arrayPath = interfaceNameToPath(interfaceName);
     const singlePath = `${arrayPath}/{id}`;
 
-    // GET /resources — paginated list
-    paths[arrayPath] = {
+    const wm = config.writeMethods;
+    const postEnabled   = !wm || wm.post   !== false;
+    const putEnabled    = !wm || wm.put    !== false;
+    const patchEnabled  = !wm || wm.patch  !== false;
+    const deleteEnabled = !wm || wm.delete !== false;
+
+    const idParameter = {
+      name: 'id',
+      in: 'path',
+      description: `ID of the ${interfaceName} (numeric, UUID, or MongoDB ObjectId)`,
+      required: true,
+      schema: { type: 'string' },
+    };
+
+    const errorContent = (description: string) => ({
+      description,
+      content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } },
+    });
+
+    // --- Collection path: GET + optional POST ---
+    const collectionPath: Record<string, OpenAPIPath> = {
       get: {
         summary: `List ${pluralize(interfaceName)}`,
         description: `Returns a paginated list of \`${interfaceName}\` objects. Supports filtering, sorting, and pagination via query parameters.`,
@@ -256,60 +284,120 @@ export function generateOpenAPISpec(config: ServerConfig): Record<string, unknow
               },
             },
           },
-          '400': {
-            description: 'Invalid query parameters',
-            content: {
-              'application/json': {
-                schema: { $ref: '#/components/schemas/ErrorResponse' },
-              },
-            },
-          },
-          '404': {
-            description: 'Type not found',
-            content: {
-              'application/json': {
-                schema: { $ref: '#/components/schemas/ErrorResponse' },
-              },
-            },
-          },
+          '400': errorContent('Invalid query parameters'),
+          '404': errorContent('Type not found'),
         },
       },
     };
 
-    // GET /resources/{id} — single item
-    paths[singlePath] = {
+    if (postEnabled) {
+      collectionPath['post'] = {
+        summary: `Create a ${interfaceName}`,
+        description:
+          `Creates a new \`${interfaceName}\`. The server generates a full mock and overrides it with matching fields from the request body. Extra fields not defined in the interface are silently ignored.`,
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': { schema: { $ref: `#/components/schemas/${interfaceName}` } },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Created',
+            headers: { Location: { schema: { type: 'string' } } },
+            content: {
+              'application/json': { schema: { $ref: `#/components/schemas/${interfaceName}` } },
+            },
+          },
+          '400': errorContent('Invalid request body'),
+          '405': errorContent('Method not allowed'),
+        },
+      };
+    }
+
+    paths[arrayPath] = collectionPath as unknown as Record<string, OpenAPIPath>;
+
+    // --- Partial schema for PATCH (all fields optional) ---
+    const partialProperties: Record<string, unknown> = {};
+    for (const [field, schema] of Object.entries(properties)) {
+      partialProperties[field] = schema;
+    }
+    const partialSchemaName = `${interfaceName}Partial`;
+    schemas[partialSchemaName] = { type: 'object', properties: partialProperties };
+
+    // --- Single-item path: GET + optional PUT/PATCH/DELETE ---
+    const singleItemPath: Record<string, OpenAPIPath> = {
       get: {
         summary: `Get a single ${interfaceName}`,
-        description: `Returns a single \`${interfaceName}\` object by ID`,
-        parameters: [
-          {
-            name: 'id',
-            in: 'path',
-            description: `ID of the ${interfaceName} (numeric, UUID, or MongoDB ObjectId)`,
-            required: true,
-            schema: { type: 'string' },
-          },
-        ],
+        description: `Returns a single \`${interfaceName}\` object by ID. Only available for resources created via POST or PUT.`,
+        parameters: [idParameter],
         responses: {
           '200': {
             description: 'Successful response',
-            content: {
-              'application/json': {
-                schema: { $ref: `#/components/schemas/${interfaceName}` },
-              },
-            },
+            content: { 'application/json': { schema: { $ref: `#/components/schemas/${interfaceName}` } } },
           },
-          '404': {
-            description: 'Type not found',
-            content: {
-              'application/json': {
-                schema: { $ref: '#/components/schemas/ErrorResponse' },
-              },
-            },
-          },
+          '404': errorContent('Resource not found'),
         },
       },
     };
+
+    if (putEnabled) {
+      singleItemPath['put'] = {
+        summary: `Replace a ${interfaceName}`,
+        description: `Full replacement (upsert). Creates the resource if it does not exist. Body fields override the generated mock.`,
+        parameters: [idParameter],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: `#/components/schemas/${interfaceName}` } },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Updated',
+            content: { 'application/json': { schema: { $ref: `#/components/schemas/${interfaceName}` } } },
+          },
+          '400': errorContent('Missing or invalid request body'),
+          '405': errorContent('Method not allowed'),
+        },
+      };
+    }
+
+    if (patchEnabled) {
+      singleItemPath['patch'] = {
+        summary: `Partially update a ${interfaceName}`,
+        description: `Partial update. Merges provided fields onto the stored object. If the resource does not exist, upserts it.`,
+        parameters: [idParameter],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: `#/components/schemas/${partialSchemaName}` } },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Updated',
+            content: { 'application/json': { schema: { $ref: `#/components/schemas/${interfaceName}` } } },
+          },
+          '400': errorContent('Missing or invalid request body'),
+          '405': errorContent('Method not allowed'),
+        },
+      };
+    }
+
+    if (deleteEnabled) {
+      singleItemPath['delete'] = {
+        summary: `Delete a ${interfaceName}`,
+        description: `Marks the resource as deleted. Subsequent GET requests for this ID return 404.`,
+        parameters: [idParameter],
+        responses: {
+          '204': { description: 'No Content' },
+          '405': errorContent('Method not allowed'),
+        },
+      };
+    }
+
+    paths[singlePath] = singleItemPath as unknown as Record<string, OpenAPIPath>;
   });
 
   // Add mock-reset endpoint
@@ -331,7 +419,6 @@ export function generateOpenAPISpec(config: ServerConfig): Record<string, unknow
                   cleared: {
                     type: 'object',
                     properties: {
-                      singles: { type: 'integer', description: 'Number of single-object entries cleared' },
                       pools: { type: 'integer', description: 'Number of array pool entries cleared' },
                     },
                   },

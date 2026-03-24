@@ -121,6 +121,7 @@ export async function runWizard(): Promise<ServerConfig> {
     let cache = savedConfig?.cache ?? true;
     let latency: { min: number; max: number } | undefined = savedConfig?.latency;
     let verbose = savedConfig?.verbose ?? false;
+    let writeMethods: ServerConfig['writeMethods'] = savedConfig?.writeMethods;
 
     if (advancedAnswer.showAdvanced) {
       const advOptions = await inquirer.prompt([
@@ -200,6 +201,40 @@ export async function runWizard(): Promise<ServerConfig> {
       } else {
         latency = undefined;
       }
+
+      // Write methods configuration
+      const writeMethodsAnswer = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'writeMode',
+          message: 'Write methods configuration:',
+          choices: [
+            { name: 'Enable all write methods (POST, PUT, PATCH, DELETE)', value: 'all' },
+            { name: 'Read-only mode (disable all write methods)', value: 'none' },
+            { name: 'Custom — toggle each method individually', value: 'custom' },
+          ],
+          default: 'all',
+        },
+      ]);
+
+      if (writeMethodsAnswer.writeMode === 'none') {
+        writeMethods = { post: false, put: false, patch: false, delete: false };
+      } else if (writeMethodsAnswer.writeMode === 'custom') {
+        const customMethods = await inquirer.prompt([
+          { type: 'confirm', name: 'post',   message: 'Enable POST?',   default: writeMethods?.post   !== false },
+          { type: 'confirm', name: 'put',    message: 'Enable PUT?',    default: writeMethods?.put    !== false },
+          { type: 'confirm', name: 'patch',  message: 'Enable PATCH?',  default: writeMethods?.patch  !== false },
+          { type: 'confirm', name: 'delete', message: 'Enable DELETE?', default: writeMethods?.delete !== false },
+        ]);
+        writeMethods = {
+          post:   customMethods.post,
+          put:    customMethods.put,
+          patch:  customMethods.patch,
+          delete: customMethods.delete,
+        };
+      } else {
+        writeMethods = undefined; // all enabled (default)
+      }
     }
 
     // Build and display the configuration summary
@@ -210,6 +245,7 @@ export async function runWizard(): Promise<ServerConfig> {
       hotReload,
       cache,
       verbose,
+      writeMethods,
     };
 
     displayConfigSummary(config);
@@ -262,6 +298,23 @@ function displayConfigSummary(config: ServerConfig): void {
   console.log(`  ${chalk.cyan('Hot-reload:')} ${config.hotReload ? 'enabled' : 'disabled'}`);
   console.log(`  ${chalk.cyan('Cache:')} ${config.cache ? 'enabled' : 'disabled'}`);
   console.log(`  ${chalk.cyan('Verbose:')} ${config.verbose ? 'enabled' : 'disabled'}`);
+
+  const wm = config.writeMethods;
+  if (wm) {
+    const enabled = (['post', 'put', 'patch', 'delete'] as const)
+      .filter((m) => wm[m] !== false)
+      .map((m) => m.toUpperCase());
+    const disabled = (['post', 'put', 'patch', 'delete'] as const)
+      .filter((m) => wm[m] === false)
+      .map((m) => m.toUpperCase());
+    if (disabled.length > 0) {
+      console.log(`  ${chalk.cyan('Write methods:')} enabled: ${enabled.join(', ') || 'none'} | disabled: ${disabled.join(', ')}`);
+    } else {
+      console.log(`  ${chalk.cyan('Write methods:')} all enabled`);
+    }
+  } else {
+    console.log(`  ${chalk.cyan('Write methods:')} all enabled`);
+  }
 
   console.log(chalk.gray('─'.repeat(50)));
   console.log('');

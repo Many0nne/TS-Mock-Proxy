@@ -122,7 +122,7 @@ export const schemaCache = new SchemaCache();
 
 /**
  * Always-on data store for stable mock data across requests.
- * Caches both single object mocks and array pools independently of config.cache.
+ * Manages array pools, per-ID write entries, and deleted-ID tracking.
  */
 interface MockEntry<T> {
   data: T;
@@ -130,19 +130,12 @@ interface MockEntry<T> {
 }
 
 export class MockDataStore {
-  private singles: Map<string, MockEntry<Record<string, unknown>>> = new Map();
   private pools: Map<string, MockEntry<Record<string, unknown>[]>> = new Map();
+  private writeStore: Map<string, Map<string, Record<string, unknown>>> = new Map();
+  private deletedIds: Map<string, Set<string>> = new Map();
 
   private key(typeName: string, filePath: string): string {
     return `${filePath}::${typeName}`;
-  }
-
-  getSingle(typeName: string, filePath: string): Record<string, unknown> | undefined {
-    return this.singles.get(this.key(typeName, filePath))?.data;
-  }
-
-  setSingle(typeName: string, filePath: string, data: Record<string, unknown>): void {
-    this.singles.set(this.key(typeName, filePath), { data, createdAt: Date.now() });
   }
 
   getPool(typeName: string, filePath: string): Record<string, unknown>[] | undefined {
@@ -153,18 +146,76 @@ export class MockDataStore {
     this.pools.set(this.key(typeName, filePath), { data, createdAt: Date.now() });
   }
 
-  invalidateFile(filePath: string): void {
-    let count = 0;
-    for (const key of this.singles.keys()) {
-      if (key.startsWith(`${filePath}::`)) {
-        this.singles.delete(key);
-        count++;
+  // --- Write store methods ---
+
+  getById(typeName: string, filePath: string, id: string): Record<string, unknown> | undefined {
+    return this.writeStore.get(this.key(typeName, filePath))?.get(id);
+  }
+
+  setById(typeName: string, filePath: string, id: string, obj: Record<string, unknown>): void {
+    const k = this.key(typeName, filePath);
+    if (!this.writeStore.has(k)) {
+      this.writeStore.set(k, new Map());
+    }
+    this.writeStore.get(k)!.set(id, obj);
+  }
+
+  markDeleted(typeName: string, filePath: string, id: string): void {
+    const k = this.key(typeName, filePath);
+    if (!this.deletedIds.has(k)) {
+      this.deletedIds.set(k, new Set());
+    }
+    this.deletedIds.get(k)!.add(id);
+    // Remove from write store if present
+    this.writeStore.get(k)?.delete(id);
+  }
+
+  getDeletedIds(typeName: string, filePath: string): Set<string> {
+    return this.deletedIds.get(this.key(typeName, filePath)) ?? new Set();
+  }
+
+  getAllWriteEntries(typeName: string, filePath: string): Map<string, Record<string, unknown>> {
+    return this.writeStore.get(this.key(typeName, filePath)) ?? new Map();
+  }
+
+  getWriteStats(): Record<string, { count: number; deletedCount: number }> {
+    const stats: Record<string, { count: number; deletedCount: number }> = {};
+    for (const [k, map] of this.writeStore.entries()) {
+      // key format is "filePath::typeName"
+      const typeName = k.split('::').at(-1) ?? k;
+      stats[typeName] = {
+        count: map.size,
+        deletedCount: this.deletedIds.get(k)?.size ?? 0,
+      };
+    }
+    for (const [k, ids] of this.deletedIds.entries()) {
+      const typeName = k.split('::').at(-1) ?? k;
+      if (!stats[typeName]) {
+        stats[typeName] = { count: 0, deletedCount: ids.size };
       }
     }
+    return stats;
+  }
+
+  // --- File invalidation & lifecycle ---
+
+  invalidateFile(filePath: string): void {
+    let count = 0;
     for (const key of this.pools.keys()) {
       if (key.startsWith(`${filePath}::`)) {
         this.pools.delete(key);
         count++;
+      }
+    }
+    for (const key of this.writeStore.keys()) {
+      if (key.startsWith(`${filePath}::`)) {
+        this.writeStore.delete(key);
+        count++;
+      }
+    }
+    for (const key of this.deletedIds.keys()) {
+      if (key.startsWith(`${filePath}::`)) {
+        this.deletedIds.delete(key);
       }
     }
     if (count > 0) {
@@ -172,17 +223,17 @@ export class MockDataStore {
     }
   }
 
-  clear(): { singles: number; pools: number } {
-    const singles = this.singles.size;
+  clear(): { pools: number } {
     const pools = this.pools.size;
-    this.singles.clear();
     this.pools.clear();
-    logger.info(`MockDataStore cleared: ${singles} single(s), ${pools} pool(s)`);
-    return { singles, pools };
+    this.writeStore.clear();
+    this.deletedIds.clear();
+    logger.info(`MockDataStore cleared: ${pools} pool(s)`);
+    return { pools };
   }
 
-  getStats(): { singles: number; pools: number } {
-    return { singles: this.singles.size, pools: this.pools.size };
+  getStats(): { pools: number } {
+    return { pools: this.pools.size };
   }
 }
 

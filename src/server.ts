@@ -10,7 +10,25 @@ import { dynamicRouteHandler } from './core/router';
 import { startFileWatcher } from './utils/fileWatcher';
 import { schemaCache, mockDataStore } from './core/cache';
 import { generateOpenAPISpec } from './core/swagger';
+import { buildTypeMap } from './utils/typeMapping';
+import { generateMockArray } from './core/parser';
+import { POOL_SIZE } from './core/queryProcessor';
 import type { FSWatcher } from 'chokidar';
+
+/**
+ * Seeds all collection pools for every @endpoint interface found in typesDir.
+ * Already-seeded pools are left untouched.
+ */
+function seedAllPools(config: ServerConfig): void {
+  const typeMap = buildTypeMap(config.typesDir);
+  typeMap.forEach((filePath, typeName) => {
+    if (!mockDataStore.getPool(typeName, filePath)) {
+      const pool = generateMockArray(filePath, typeName, { arrayLength: POOL_SIZE });
+      mockDataStore.setPool(typeName, filePath, pool);
+      logger.debug(`Pool seeded: ${typeName} (${pool.length} items)`);
+    }
+  });
+}
 
 /**
  * Creates and configures the Express server
@@ -21,6 +39,9 @@ export function createServer(config: ServerConfig): Express {
   // Store swagger spec in the app locals so it can be updated on file changes
   let swaggerSpec = generateOpenAPISpec(config);
   app.locals.swaggerSpec = swaggerSpec;
+
+  // Eagerly seed all collection pools so GET /{col}/{id} works immediately
+  seedAllPools(config);
 
   // Global middlewares
   app.use(cors());
@@ -44,11 +65,13 @@ export function createServer(config: ServerConfig): Express {
       status: 'ok',
       uptime: process.uptime(),
       cache: schemaCache.getStats(),
+      writeStore: mockDataStore.getWriteStats(),
       config: {
         typesDir: config.typesDir,
         port: config.port,
         hotReload: config.hotReload,
         cache: config.cache,
+        writeMethods: config.writeMethods,
       },
     });
   });
@@ -106,6 +129,7 @@ window.addEventListener('load', function () {
   app.post('/mock-reset', (_req, res) => {
     const mockCleared = mockDataStore.clear();
     schemaCache.clear();
+    seedAllPools(config);
     res.json({ message: 'Mock data store cleared', cleared: mockCleared });
   });
 
@@ -165,10 +189,15 @@ export function startServer(
   if (config.hotReload) {
     watcher = startFileWatcher(config.typesDir, (filePath) => {
       logger.info(`Type file updated: ${filePath}`);
-      
-      // Regenerate Swagger spec to include new endpoints
+
+      // Clear cached data for the affected file (pools, singles, write store)
+      mockDataStore.invalidateFile(filePath);
+      schemaCache.invalidateFile(filePath);
+
+      // Regenerate Swagger spec and re-seed pools for affected types
       const newSwaggerSpec = generateOpenAPISpec(config);
       app.locals.swaggerSpec = newSwaggerSpec;
+      seedAllPools(config);
       logger.success('Swagger spec regenerated with updated endpoints');
     });
   }
