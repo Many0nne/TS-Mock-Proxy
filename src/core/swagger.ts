@@ -419,7 +419,6 @@ export function generateOpenAPISpec(config: ServerConfig): Record<string, unknow
                   cleared: {
                     type: 'object',
                     properties: {
-                      singles: { type: 'integer', description: 'Number of single-object entries cleared' },
                       pools: { type: 'integer', description: 'Number of array pool entries cleared' },
                     },
                   },

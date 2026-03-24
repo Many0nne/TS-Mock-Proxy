@@ -11,6 +11,7 @@ import {
   applyPagination,
   POOL_SIZE,
 } from './queryProcessor';
+import type { WriteMethod } from '../types/config';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -46,16 +47,10 @@ function findIdField(obj: Record<string, unknown>): string | undefined {
 }
 
 /** Returns true when the given write method is enabled in the config. */
-function isWriteMethodEnabled(config: ServerConfig, method: string): boolean {
+function isWriteMethodEnabled(config: ServerConfig, method: WriteMethod): boolean {
   const wm = config.writeMethods;
   if (!wm) return true;
-  switch (method) {
-    case 'post':   return wm.post   !== false;
-    case 'put':    return wm.put    !== false;
-    case 'patch':  return wm.patch  !== false;
-    case 'delete': return wm.delete !== false;
-    default:       return true;
-  }
+  return wm[method] !== false;
 }
 
 /** Builds the Allow header value for collection endpoints. */
@@ -120,7 +115,7 @@ function buildLivePool(
     return id === undefined || !deletedIds.has(id);
   });
 
-  return [...fromPool, ...fromWriteStore];
+  return [...fromWriteStore, ...fromPool];
 }
 
 // ---------------------------------------------------------------------------
@@ -173,7 +168,7 @@ async function handleGet(
 
     res.status(forcedStatus || 200).json(applyPagination(livePool, parsed));
   } else {
-    // Single-item GET — stateful: only return if in write store, 404 otherwise
+    // Single-item GET — checks deletedIds, then write store, then seeded pool
     const urlId = extractIdFromUrl(req.path);
 
     if (urlId !== undefined) {
@@ -251,11 +246,6 @@ async function handlePost(
 
   if (id !== undefined) {
     mockDataStore.setById(mapping.typeName, filePath, id, merged);
-    // Append to pool (seed it first if needed)
-    const pool = mockDataStore.getPool(mapping.typeName, filePath) ?? [];
-    if (!mockDataStore.getPool(mapping.typeName, filePath)) {
-      mockDataStore.setPool(mapping.typeName, filePath, pool);
-    }
     updatePoolEntry(mapping.typeName, filePath, id, merged);
   }
 
@@ -357,7 +347,13 @@ async function handlePatch(
   let base: Record<string, unknown>;
   if (urlId !== undefined) {
     const stored = mockDataStore.getById(mapping.typeName, filePath, urlId);
-    base = stored ?? generateMockFromInterface(filePath, mapping.typeName);
+    if (stored) {
+      base = stored;
+    } else {
+      const pool = mockDataStore.getPool(mapping.typeName, filePath);
+      const poolItem = pool?.find((item) => extractMockId(item) === urlId);
+      base = poolItem ?? generateMockFromInterface(filePath, mapping.typeName);
+    }
   } else {
     base = generateMockFromInterface(filePath, mapping.typeName);
   }

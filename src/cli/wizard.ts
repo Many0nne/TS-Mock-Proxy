@@ -309,6 +309,8 @@ function displayConfigSummary(config: ServerConfig): void {
       .map((m) => m.toUpperCase());
     if (disabled.length > 0) {
       console.log(`  ${chalk.cyan('Write methods:')} enabled: ${enabled.join(', ') || 'none'} | disabled: ${disabled.join(', ')}`);
+    } else {
+      console.log(`  ${chalk.cyan('Write methods:')} all enabled`);
     }
   } else {
     console.log(`  ${chalk.cyan('Write methods:')} all enabled`);

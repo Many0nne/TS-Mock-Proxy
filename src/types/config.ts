@@ -93,3 +93,5 @@ export interface MockGenerationOptions {
   /** Seed for random generation (reproducibility) */
   seed?: number;
 }
+
+export type WriteMethod = 'post' | 'put' | 'patch' | 'delete';
