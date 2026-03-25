@@ -353,6 +353,62 @@ describe('Server integration', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // mockMode: strict
+  // ---------------------------------------------------------------------------
+  describe('mockMode: strict', () => {
+    const strictApp = createServer({
+      typesDir: FIXTURES_DIR,
+      port: 0,
+      hotReload: false,
+      cache: false,
+      verbose: false,
+      mockMode: 'strict',
+    });
+
+    it('ignores x-mock-status header and returns normal status', async () => {
+      const res = await request(strictApp)
+        .get('/api/users')
+        .set('x-mock-status', '503');
+      expect(res.status).toBe(200);
+    });
+
+    it('ignores x-mock-status on write methods', async () => {
+      const res = await request(strictApp)
+        .post('/api/users')
+        .set('x-mock-status', '409')
+        .send({ name: 'Alice' });
+      expect(res.status).toBe(201);
+    });
+
+    it('still serves normal mock data', async () => {
+      const res = await request(strictApp).get('/api/users');
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.data)).toBe(true);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // mockMode: dev (explicit)
+  // ---------------------------------------------------------------------------
+  describe('mockMode: dev', () => {
+    const devApp = createServer({
+      typesDir: FIXTURES_DIR,
+      port: 0,
+      hotReload: false,
+      cache: false,
+      verbose: false,
+      mockMode: 'dev',
+    });
+
+    it('applies x-mock-status header', async () => {
+      const res = await request(devApp)
+        .get('/api/users')
+        .set('x-mock-status', '503');
+      expect(res.status).toBe(503);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // Disabled write methods
   // ---------------------------------------------------------------------------
   describe('Disabled write methods', () => {

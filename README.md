@@ -83,11 +83,20 @@ Options:
   -t, --types-dir <path>        Directory with TypeScript types (required)
   -p, --port <number>           Server port (default: 8080)
   -l, --latency <range>         Latency simulation "min-max" (e.g., 500-2000)
+  --mock-mode <strict|dev>      Mock mode (default: dev)
   --no-hot-reload               Disable auto-reload on changes
   --no-cache                    Disable schema caching
   -v, --verbose                 Enable verbose logging
   -h, --help                    Show help
 ```
+
+**Environment Variables**
+
+| Variable | Values | Description |
+|---|---|---|
+| `MOCK_API_MODE` | `strict`, `dev` | Override mock mode without CLI flag |
+
+Resolution order: CLI `--mock-mode` > `MOCK_API_MODE` env var > config file > default (`dev`).
 
 **Step 3: Call your API**
 
@@ -294,6 +303,44 @@ export interface Product {
 - `npm test -- constraintExtractor.test.ts` - Test constraint JSDoc extraction
 - `npm test -- constraintValidator.test.ts` - Test constraint validation
 - `npm test -- constrainedGenerator.test.ts` - Test constrained data generation
+
+---
+
+## Mock Modes
+
+The server supports two modes controlled by `mockMode`:
+
+| Mode | Description |
+|---|---|
+| `dev` (default) | All mock features enabled: `x-mock-status` header, artificial latency |
+| `strict` | Clean REST simulation — mock features disabled, behaviour matches a real API |
+
+In `strict` mode, the `statusOverride` and `latency` middlewares are not mounted at all.
+
+```bash
+# CLI
+npx ts-mock-proxy --types-dir ./types --mock-mode strict
+
+# Environment variable
+MOCK_API_MODE=strict npx ts-mock-proxy --types-dir ./types
+```
+
+### Mock features (dev mode only, non-prod)
+
+These features are active only in `dev` mode and should not be used to simulate real API behaviour:
+
+**`x-mock-status`** — forces any response to return the specified HTTP status code:
+
+```bash
+# Force a 503 response
+curl -H "x-mock-status: 503" http://localhost:8080/users
+```
+
+**Artificial latency** — simulates network delay (configured via `--latency` or the wizard):
+
+```bash
+npx ts-mock-proxy --types-dir ./types --latency 200-800
+```
 
 ---
 

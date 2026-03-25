@@ -51,12 +51,13 @@ export function createServer(config: ServerConfig): Express {
   // Logging middleware
   app.use(requestLoggerMiddleware);
 
-  // Status override middleware
-  app.use(statusOverrideMiddleware);
+  // Mock-only middlewares — only mounted in 'dev' mode
+  if ((config.mockMode ?? 'dev') === 'dev') {
+    app.use(statusOverrideMiddleware);
 
-  // Latency middleware (if configured)
-  if (config.latency) {
-    app.use(latencyMiddleware(config.latency.min, config.latency.max));
+    if (config.latency) {
+      app.use(latencyMiddleware(config.latency.min, config.latency.max));
+    }
   }
 
   // Health route
@@ -169,8 +170,9 @@ export function startServer(
   const server = app.listen(config.port, () => {
     logger.server(config.port);
     logger.info(`Types directory: ${config.typesDir}`);
+    logger.info(`Mock mode: ${config.mockMode ?? 'dev'}`);
 
-    if (config.latency) {
+    if (config.latency && (config.mockMode ?? 'dev') === 'dev') {
       logger.info(
         `Latency simulation: ${config.latency.min}-${config.latency.max}ms`
       );

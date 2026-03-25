@@ -2,7 +2,7 @@ import inquirer from 'inquirer';
 import * as path from 'path';
 import * as fs from 'fs';
 import chalk from 'chalk';
-import { ServerConfig } from '../types/config';
+import { ServerConfig, MockMode } from '../types/config';
 import { logger } from '../utils/logger';
 import { loadSavedConfig, saveConfig } from '../utils/configPersistence';
 
@@ -122,9 +122,20 @@ export async function runWizard(): Promise<ServerConfig> {
     let latency: { min: number; max: number } | undefined = savedConfig?.latency;
     let verbose = savedConfig?.verbose ?? false;
     let writeMethods: ServerConfig['writeMethods'] = savedConfig?.writeMethods;
+    let mockMode: MockMode = savedConfig?.mockMode ?? 'dev';
 
     if (advancedAnswer.showAdvanced) {
       const advOptions = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'mockMode',
+          message: 'Mock mode:',
+          choices: [
+            { name: 'dev — all mock features enabled (status override, artificial latency)', value: 'dev' },
+            { name: 'strict — clean REST simulation, mock features disabled', value: 'strict' },
+          ],
+          default: mockMode,
+        },
         {
           type: 'confirm',
           name: 'hotReload',
@@ -151,6 +162,7 @@ export async function runWizard(): Promise<ServerConfig> {
         },
       ]);
 
+      mockMode = advOptions.mockMode;
       hotReload = advOptions.hotReload;
       cache = advOptions.cache;
       verbose = advOptions.verbose;
@@ -246,6 +258,7 @@ export async function runWizard(): Promise<ServerConfig> {
       cache,
       verbose,
       writeMethods,
+      mockMode,
     };
 
     displayConfigSummary(config);
@@ -295,6 +308,7 @@ function displayConfigSummary(config: ServerConfig): void {
     console.log(`  ${chalk.cyan('Latency:')} ${config.latency.min}-${config.latency.max}ms`);
   }
 
+  console.log(`  ${chalk.cyan('Mock mode:')} ${config.mockMode ?? 'dev'}`);
   console.log(`  ${chalk.cyan('Hot-reload:')} ${config.hotReload ? 'enabled' : 'disabled'}`);
   console.log(`  ${chalk.cyan('Cache:')} ${config.cache ? 'enabled' : 'disabled'}`);
   console.log(`  ${chalk.cyan('Verbose:')} ${config.verbose ? 'enabled' : 'disabled'}`);

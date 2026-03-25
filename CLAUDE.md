@@ -26,8 +26,13 @@ TypeScript is strict (`noUnusedLocals`, `noUnusedParameters`, `noUncheckedIndexe
 
 **Entry point**: `src/index.ts` — parses CLI args via Commander; if no args, runs the interactive `src/cli/wizard.ts`. Both paths call `startServer(config)`.
 
+**Mock modes** (`mockMode: 'dev' | 'strict'`, default `'dev'`):
+- `dev`: `statusOverride` and `latency` middlewares are mounted
+- `strict`: those middlewares are not mounted at all — clean REST simulation
+- Resolution order: CLI `--mock-mode` > `MOCK_API_MODE` env var > config file > default (`'dev'`)
+
 **Request lifecycle** (`src/server.ts` → `src/core/router.ts`):
-1. Express middleware chain: CORS → JSON → logger → `statusOverride` → optional latency
+1. Express middleware chain: CORS → JSON → logger → `statusOverride` (dev only) → latency (dev only, if configured)
 2. All non-system routes hit `dynamicRouteHandler` (catch-all `app.all('*')`)
 3. Router calls `findTypeForUrl(url, typesDir)` to resolve a TypeScript interface name from the URL
 4. Calls `generateMockFromInterface` or `generateMockArray` from `src/core/parser.ts`
@@ -47,11 +52,11 @@ TypeScript is strict (`noUnusedLocals`, `noUnusedParameters`, `noUncheckedIndexe
 - After generation, `extractConstraints` parses the TypeScript AST (via `typescript` compiler API) for JSDoc annotations (`@min`, `@max`, `@minLength`, `@maxLength`, `@pattern`, `@enum`)
 - `applyConstraintsToMock` in `src/core/constrainedGenerator.ts` then regenerates non-conforming fields using Faker
 
-**Special headers**:
-- `x-mock-status: <code>` — forces the response HTTP status code (handled by `src/middlewares/statusOverride.ts`)
+**Special headers** (dev mode only):
+- `x-mock-status: <code>` — forces the response HTTP status code (handled by `src/middlewares/statusOverride.ts`; ignored in `strict` mode by not mounting the middleware)
 
 **System routes** (not matched by dynamic handler):
 - `GET /health` — server status + cache stats
 - `GET /api-docs` — Swagger UI (spec auto-regenerated on hot-reload file changes)
 
-**Key types** (`src/types/config.ts`): `ServerConfig`, `RouteTypeMapping`, `InterfaceMetadata`, `ParsedSchema`, `MockGenerationOptions`
+**Key types** (`src/types/config.ts`): `ServerConfig`, `MockMode`, `RouteTypeMapping`, `InterfaceMetadata`, `ParsedSchema`, `MockGenerationOptions`

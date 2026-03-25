@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import { ServerConfig } from './types/config';
+import { ServerConfig, MockMode } from './types/config';
 import { startServer } from './server';
 import { logger } from './utils/logger';
 import { schemaCache } from './core/cache';
@@ -10,6 +10,18 @@ import { parseLatency, validateTypesDir } from './cli/helpers';
 import { saveConfig } from './utils/configPersistence';
 
 const program = new Command();
+
+/**
+ * Resolves the mock mode from CLI arg or MOCK_API_MODE env var.
+ * Exits with a clear error if the value is invalid.
+ */
+function resolveMockMode(cliValue?: string): MockMode {
+  const value = cliValue ?? process.env['MOCK_API_MODE'];
+  if (!value) return 'dev';
+  if (value === 'strict' || value === 'dev') return value;
+  logger.error(`Invalid mockMode value: "${value}". Must be "strict" or "dev".`);
+  process.exit(1);
+}
 
 async function main() {
   // Check if user provided explicit CLI arguments
@@ -38,6 +50,7 @@ async function main() {
     .option('--no-hot-reload', 'Disable hot-reload of type definitions')
     .option('--no-cache', 'Disable schema caching')
     .option('-v, --verbose', 'Enable verbose logging', false)
+    .option('--mock-mode <strict|dev>', 'Mock mode: "dev" enables all mock features (default), "strict" disables them')
     .option('--interactive', 'Force interactive mode')
     .action(async (options) => {
       // If --interactive flag is set, run wizard instead
@@ -61,6 +74,9 @@ async function main() {
         latency = parseLatency(options.latency);
       }
 
+      // Resolve mockMode: CLI > ENV > default
+      const mockMode = resolveMockMode(options.mockMode);
+
       // Build the configuration
       const config: ServerConfig = {
         typesDir,
@@ -69,6 +85,7 @@ async function main() {
         hotReload: options.hotReload !== false,
         cache: options.cache !== false,
         verbose: options.verbose,
+        mockMode,
       };
 
       // Configure the global cache

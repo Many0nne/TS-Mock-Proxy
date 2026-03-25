@@ -40,3 +40,4 @@ temp/
 
 # Config files
 .mock-config.json
+docs/

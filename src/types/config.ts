@@ -1,4 +1,11 @@
 /**
+ * Mock mode controlling which mock-only features are active
+ * - `dev`: all mock features enabled (status override, artificial latency)
+ * - `strict`: clean REST simulation, mock features disabled
+ */
+export type MockMode = 'strict' | 'dev';
+
+/**
  * TS-Mock-Proxy server configuration
  */
 export interface ServerConfig {
@@ -22,6 +29,12 @@ export interface ServerConfig {
 
   /** Verbose mode for logging */
   verbose: boolean;
+
+  /**
+   * Mock mode: 'dev' (default) enables all mock features; 'strict' disables them.
+   * Resolution order: CLI > MOCK_API_MODE env var > config file > default ('dev')
+   */
+  mockMode?: MockMode;
 
   /** Enable/disable write HTTP methods (POST, PUT, PATCH, DELETE). All enabled by default. */
   writeMethods?: {
