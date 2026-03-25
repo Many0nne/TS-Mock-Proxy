@@ -1,6 +1,14 @@
 import { ParsedSchema } from '../types/config';
 import { logger } from '../utils/logger';
 
+/** Returns the value of the first recognised ID field (id, uuid, _id) in a mock object. */
+function extractMockId(obj: Record<string, unknown>): string | undefined {
+  for (const field of ['id', 'uuid', '_id']) {
+    if (obj[field] !== undefined) return String(obj[field]);
+  }
+  return undefined;
+}
+
 /**
  * In-memory cache for parsed TypeScript schemas
  */
@@ -234,6 +242,31 @@ export class MockDataStore {
 
   getStats(): { pools: number } {
     return { pools: this.pools.size };
+  }
+
+  /**
+   * Returns the live pool for a type: write-store entries merged with the seeded pool,
+   * excluding deleted IDs. Write-store entries take precedence over pool items.
+   */
+  getLivePool(typeName: string, filePath: string): Record<string, unknown>[] {
+    const pool = this.pools.get(this.key(typeName, filePath))?.data ?? [];
+    const deletedIds = this.deletedIds.get(this.key(typeName, filePath)) ?? new Set<string>();
+    const writeEntries = this.writeStore.get(this.key(typeName, filePath)) ?? new Map<string, Record<string, unknown>>();
+
+    const fromPool = pool.filter((item) => {
+      const id = extractMockId(item);
+      if (id === undefined) return true;
+      if (deletedIds.has(id)) return false;
+      if (writeEntries.has(id)) return false;
+      return true;
+    });
+
+    const fromWriteStore = Array.from(writeEntries.values()).filter((item) => {
+      const id = extractMockId(item);
+      return id === undefined || !deletedIds.has(id);
+    });
+
+    return [...fromWriteStore, ...fromPool];
   }
 }
 

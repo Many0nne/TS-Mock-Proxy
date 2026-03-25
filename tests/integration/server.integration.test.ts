@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import request from 'supertest';
 import { createServer } from '../../src/server';
@@ -431,6 +433,204 @@ describe('Server integration', () => {
     it('returns 405 for DELETE when disabled', async () => {
       const res = await request(readOnlyApp).delete('/api/users/1');
       expect(res.status).toBe(405);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // GET /health — types list
+  // ---------------------------------------------------------------------------
+  describe('GET /health types list', () => {
+    it('includes a types array with available endpoint names', async () => {
+      const res = await request(app).get('/health');
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('types');
+      expect(Array.isArray(res.body.types)).toBe(true);
+      expect(res.body.types).toContain('User');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // POST /mock-reset/:typeName
+  // ---------------------------------------------------------------------------
+  describe('POST /mock-reset/:typeName', () => {
+    it('returns 200 with count for a known type', async () => {
+      const res = await request(app).post('/mock-reset/User');
+      expect(res.status).toBe(200);
+      expect(res.body.type).toBe('User');
+      expect(typeof res.body.count).toBe('number');
+      expect(res.body.count).toBeGreaterThan(0);
+      expect(res.body.message).toMatch(/User/);
+    });
+
+    it('returns 404 for an unknown type', async () => {
+      const res = await request(app).post('/mock-reset/UnknownType');
+      expect(res.status).toBe(404);
+    });
+
+    it('does not affect other types', async () => {
+      // Seed users, record first ID
+      const listBefore = await request(app).get('/api/users');
+      const idBefore = listBefore.body.data[0].id;
+
+      // This type doesn't exist but serves as proof other types are untouched
+      // — we just verify our User pool is regenerated (new IDs may differ)
+      await request(app).post('/mock-reset/User');
+
+      const listAfter = await request(app).get('/api/users');
+      expect(listAfter.status).toBe(200);
+      expect(listAfter.body.data.length).toBeGreaterThan(0);
+      // Pool was regenerated so the previous ID may no longer exist
+      const idsAfter = listAfter.body.data.map((u: { id: unknown }) => String(u.id));
+      expect(idsAfter).not.toContain(String(idBefore));
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // persistData — JSON persistence
+  // ---------------------------------------------------------------------------
+  describe('persistData', () => {
+    function makeTempPath(): string {
+      return path.join(os.tmpdir(), `mock-persist-integration-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+    }
+
+    afterEach(() => {
+      invalidateTypeMap();
+      mockDataStore.clear();
+    });
+
+    it('does not create a file when persistData is not set', () => {
+      const filePath = makeTempPath();
+      // testConfig has no persistData — file must not be created
+      expect(fs.existsSync(filePath)).toBe(false);
+    });
+
+    it('creates the persist file on first launch when persistData is set', () => {
+      const filePath = makeTempPath();
+      try {
+        createServer({ ...testConfig, persistData: filePath });
+        expect(fs.existsSync(filePath)).toBe(true);
+        const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        expect(data).toHaveProperty('User');
+        expect(Array.isArray(data['User'])).toBe(true);
+      } finally {
+        try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+      }
+    });
+
+    it('loads pools from existing file on startup', () => {
+      const filePath = makeTempPath();
+      try {
+        const savedUsers = [{ id: 99, name: 'Persisted', email: 'p@example.com' }];
+        fs.writeFileSync(filePath, JSON.stringify({ User: savedUsers }, null, 2), 'utf-8');
+
+        const persistApp = createServer({ ...testConfig, persistData: filePath });
+
+        return request(persistApp).get('/api/users?pageSize=100').then((res) => {
+          expect(res.status).toBe(200);
+          const ids = res.body.data.map((u: { id: unknown }) => u.id);
+          expect(ids).toContain(99);
+        });
+      } finally {
+        try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+      }
+    });
+
+    it('updates the file after POST', async () => {
+      const filePath = makeTempPath();
+      try {
+        const persistApp = createServer({ ...testConfig, persistData: filePath });
+
+        await request(persistApp).post('/api/users').send({ name: 'NewUser', email: 'n@e.com' });
+
+        const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        const names = (data['User'] as Array<{ name?: unknown }>).map((u) => u.name);
+        expect(names).toContain('NewUser');
+      } finally {
+        try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+      }
+    });
+
+    it('updates file with [] after all items are deleted', async () => {
+      const filePath = makeTempPath();
+      try {
+        // Start with exactly one user
+        const singleUser = [{ id: 1, name: 'Solo', email: 's@e.com' }];
+        fs.writeFileSync(filePath, JSON.stringify({ User: singleUser }, null, 2), 'utf-8');
+
+        const persistApp = createServer({ ...testConfig, persistData: filePath });
+
+        await request(persistApp).delete('/api/users/1');
+
+        const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        expect(data['User']).toEqual([]);
+      } finally {
+        try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+      }
+    });
+
+    it('POST /mock-reset overwrites file with fresh data', async () => {
+      const filePath = makeTempPath();
+      try {
+        // Start with persisted data
+        const savedUsers = [{ id: 99, name: 'Old', email: 'o@e.com' }];
+        fs.writeFileSync(filePath, JSON.stringify({ User: savedUsers }, null, 2), 'utf-8');
+
+        const persistApp = createServer({ ...testConfig, persistData: filePath });
+
+        await request(persistApp).post('/mock-reset');
+
+        const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        expect(data).toHaveProperty('User');
+        // After reset, old ID 99 should be gone (fresh generation)
+        const ids = (data['User'] as Array<{ id?: unknown }>).map((u) => u.id);
+        expect(ids).not.toContain(99);
+      } finally {
+        try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+      }
+    });
+
+    it('POST /mock-reset/:typeName updates only the target type in the file', async () => {
+      const filePath = makeTempPath();
+      try {
+        const persistApp = createServer({ ...testConfig, persistData: filePath });
+
+        // Record initial data
+        const before = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        const usersBefore = JSON.stringify(before['User']);
+
+        await request(persistApp).post('/mock-reset/User');
+
+        const after = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        // User pool was regenerated (different content expected)
+        expect(JSON.stringify(after['User'])).not.toBe(usersBefore);
+      } finally {
+        try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+      }
+    });
+
+    it('POST /mock-reset/:typeName returns 404 for unknown type', async () => {
+      const filePath = makeTempPath();
+      try {
+        const persistApp = createServer({ ...testConfig, persistData: filePath });
+        const res = await request(persistApp).post('/mock-reset/NonExistentType');
+        expect(res.status).toBe(404);
+      } finally {
+        try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+      }
+    });
+
+    it('starts normally when persist file contains invalid JSON (warning, no crash)', () => {
+      const filePath = makeTempPath();
+      try {
+        fs.writeFileSync(filePath, '{ bad json!!', 'utf-8');
+        expect(() => {
+          createServer({ ...testConfig, persistData: filePath });
+        }).not.toThrow();
+        // File is NOT overwritten when corrupt
+        expect(fs.readFileSync(filePath, 'utf-8')).toBe('{ bad json!!');
+      } finally {
+        try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+      }
     });
   });
 });

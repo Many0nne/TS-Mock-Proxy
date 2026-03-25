@@ -22,6 +22,7 @@ function isValidSavedConfig(obj: unknown): obj is ServerConfig {
     const latency = s['latency'] as Record<string, unknown>;
     if (typeof latency['min'] !== 'number' || typeof latency['max'] !== 'number') return false;
   }
+  if (s['persistData'] !== undefined && s['persistData'] !== false && typeof s['persistData'] !== 'string') return false;
   return true;
 }
 

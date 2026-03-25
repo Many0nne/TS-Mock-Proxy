@@ -56,7 +56,22 @@ TypeScript is strict (`noUnusedLocals`, `noUnusedParameters`, `noUncheckedIndexe
 - `x-mock-status: <code>` — forces the response HTTP status code (handled by `src/middlewares/statusOverride.ts`; ignored in `strict` mode by not mounting the middleware)
 
 **System routes** (not matched by dynamic handler):
-- `GET /health` — server status + cache stats
-- `GET /api-docs` — Swagger UI (spec auto-regenerated on hot-reload file changes)
+- `GET /health` — server status + cache stats + list of available type names (`types: string[]`)
+- `GET /api-docs` — Swagger UI (spec auto-regenerated on hot-reload file changes; includes type-selector dropdown for selective rebuild)
+- `POST /mock-reset` — clear all mock data and re-seed
+- `POST /mock-reset/:typeName` — regenerate mock data for a single type only; 404 if type unknown
+
+**JSON persistence** (`persistData?: string | false` in `ServerConfig`):
+- Opt-in via `--persist-data [path]` CLI or wizard advanced options (default path: `.mock-data.json`)
+- Startup: `seedAllPools` runs first, then if file exists it loads pools from file (corrupt files are left untouched); then saves to ensure file matches `typesDir`
+- After POST/PUT/PATCH/DELETE: `saveMockData` is called from `router.ts` via `maybePersist(config)`
+- After `/mock-reset` or hot-reload: file is overwritten with fresh data
+- `POST /mock-reset/:typeName`: only the target type is regenerated and saved
+- File format: `{ TypeName: [...items] }` — keyed by TypeScript interface name, not route name
+- Atomic write: write to `.mock-data.json.tmp` then `rename` (no corruption on interruption)
+- Empty array `[]` is a valid persisted state (all items deleted) — not regenerated on reload
+- Unknown keys in the file are silently skipped (debug log emitted)
+- Module: `src/utils/dataPersistence.ts` — `saveMockData(store, typesDir, filePath)` and `loadMockData(store, typesDir, filePath)`
+- `MockDataStore.getLivePool(typeName, filePath)` — the authoritative merge of pool + writeStore − deletedIds; used by both the router (GET collection) and the persistence module
 
 **Key types** (`src/types/config.ts`): `ServerConfig`, `MockMode`, `RouteTypeMapping`, `InterfaceMetadata`, `ParsedSchema`, `MockGenerationOptions`

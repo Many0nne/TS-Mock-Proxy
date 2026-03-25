@@ -123,6 +123,7 @@ export async function runWizard(): Promise<ServerConfig> {
     let verbose = savedConfig?.verbose ?? false;
     let writeMethods: ServerConfig['writeMethods'] = savedConfig?.writeMethods;
     let mockMode: MockMode = savedConfig?.mockMode ?? 'dev';
+    let persistData: string | false = savedConfig?.persistData ?? false;
 
     if (advancedAnswer.showAdvanced) {
       const advOptions = await inquirer.prompt([
@@ -214,6 +215,30 @@ export async function runWizard(): Promise<ServerConfig> {
         latency = undefined;
       }
 
+      // Persistence configuration
+      const persistAnswer = await inquirer.prompt([
+        {
+          type: 'confirm',
+          name: 'enablePersist',
+          message: 'Persist mock data to JSON file?',
+          default: !!persistData,
+        },
+      ]);
+
+      if (persistAnswer.enablePersist) {
+        const persistPathAnswer = await inquirer.prompt([
+          {
+            type: 'input',
+            name: 'persistPath',
+            message: 'Path to persist file?',
+            default: typeof persistData === 'string' ? persistData : '.mock-data.json',
+          },
+        ]);
+        persistData = persistPathAnswer.persistPath as string;
+      } else {
+        persistData = false;
+      }
+
       // Write methods configuration
       const writeMethodsAnswer = await inquirer.prompt([
         {
@@ -259,6 +284,7 @@ export async function runWizard(): Promise<ServerConfig> {
       verbose,
       writeMethods,
       mockMode,
+      persistData: persistData || undefined,
     };
 
     displayConfigSummary(config);
@@ -312,6 +338,7 @@ function displayConfigSummary(config: ServerConfig): void {
   console.log(`  ${chalk.cyan('Hot-reload:')} ${config.hotReload ? 'enabled' : 'disabled'}`);
   console.log(`  ${chalk.cyan('Cache:')} ${config.cache ? 'enabled' : 'disabled'}`);
   console.log(`  ${chalk.cyan('Verbose:')} ${config.verbose ? 'enabled' : 'disabled'}`);
+  console.log(`  ${chalk.cyan('Persist data:')} ${config.persistData ? config.persistData : 'disabled'}`);
 
   const wm = config.writeMethods;
   if (wm) {

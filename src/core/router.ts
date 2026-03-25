@@ -1,3 +1,4 @@
+import * as path from 'path';
 import { Request, Response } from 'express';
 import { ServerConfig, ApiErrorResponse } from '../types/config';
 import { findTypeForUrl } from '../utils/typeMapping';
@@ -5,6 +6,7 @@ import { parseUrlSegments, isIdSegment } from '../utils/pluralize';
 import { generateMockFromInterface, generateMockArray } from './parser';
 import { mockDataStore } from './cache';
 import { logger } from '../utils/logger';
+import { saveMockData } from '../utils/dataPersistence';
 import {
   parseQueryParams,
   validateSortFields,
@@ -90,32 +92,10 @@ function updatePoolEntry(
   mockDataStore.setPool(typeName, filePath, pool);
 }
 
-/**
- * Builds the "live pool" for a collection endpoint by merging the seeded pool
- * with write-store entries, excluding deleted items and replacing overridden ones.
- */
-function buildLivePool(
-  typeName: string,
-  filePath: string,
-  pool: Record<string, unknown>[]
-): Record<string, unknown>[] {
-  const deletedIds = mockDataStore.getDeletedIds(typeName, filePath);
-  const writeEntries = mockDataStore.getAllWriteEntries(typeName, filePath);
-
-  const fromPool = pool.filter((item) => {
-    const id = extractMockId(item);
-    if (id === undefined) return true;
-    if (deletedIds.has(id)) return false;
-    if (writeEntries.has(id)) return false; // write-store version takes precedence
-    return true;
-  });
-
-  const fromWriteStore = Array.from(writeEntries.values()).filter((item) => {
-    const id = extractMockId(item);
-    return id === undefined || !deletedIds.has(id);
-  });
-
-  return [...fromWriteStore, ...fromPool];
+/** Saves mock data to the persist file if persistData is configured. */
+function maybePersist(config: ServerConfig): void {
+  if (!config.persistData) return;
+  saveMockData(mockDataStore, config.typesDir, path.resolve(config.persistData));
 }
 
 // ---------------------------------------------------------------------------
@@ -148,13 +128,12 @@ async function handleGet(
     }
 
     // Seed pool on first request
-    let pool = mockDataStore.getPool(mapping.typeName, filePath);
-    if (!pool) {
-      pool = generateMockArray(filePath, mapping.typeName, { arrayLength: POOL_SIZE });
+    if (!mockDataStore.getPool(mapping.typeName, filePath)) {
+      const pool = generateMockArray(filePath, mapping.typeName, { arrayLength: POOL_SIZE });
       mockDataStore.setPool(mapping.typeName, filePath, pool);
     }
 
-    const livePool = buildLivePool(mapping.typeName, filePath, pool);
+    const livePool = mockDataStore.getLivePool(mapping.typeName, filePath);
 
     if (parsed.sort.length > 0 && livePool.length > 0) {
       const firstItem = livePool[0];
@@ -252,6 +231,7 @@ async function handlePost(
   const basePath = req.path.replace(/\/$/, '');
   const location = id !== undefined ? `${basePath}/${id}` : basePath;
 
+  maybePersist(config);
   res.status(forcedStatus || 201).set('Location', location).json(merged);
 }
 
@@ -305,6 +285,7 @@ async function handlePut(
     updatePoolEntry(mapping.typeName, filePath, id, merged);
   }
 
+  maybePersist(config);
   res.status(forcedStatus || 200).json(merged);
 }
 
@@ -373,6 +354,7 @@ async function handlePatch(
     updatePoolEntry(mapping.typeName, filePath, id, merged);
   }
 
+  maybePersist(config);
   res.status(forcedStatus || 200).json(merged);
 }
 
@@ -415,6 +397,7 @@ async function handleDelete(
     }
   }
 
+  maybePersist(config);
   res.status(forcedStatus || 204).send();
 }
 

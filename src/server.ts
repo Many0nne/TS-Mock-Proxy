@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import express, { Express, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import swaggerUi from 'swagger-ui-express';
@@ -13,6 +15,7 @@ import { generateOpenAPISpec } from './core/swagger';
 import { buildTypeMap } from './utils/typeMapping';
 import { generateMockArray } from './core/parser';
 import { POOL_SIZE } from './core/queryProcessor';
+import { saveMockData, loadMockData } from './utils/dataPersistence';
 import type { FSWatcher } from 'chokidar';
 
 /**
@@ -43,6 +46,18 @@ export function createServer(config: ServerConfig): Express {
   // Eagerly seed all collection pools so GET /{col}/{id} works immediately
   seedAllPools(config);
 
+  // Persistence: load from file (if it exists) or create the file with generated data
+  if (config.persistData) {
+    const persistPath = path.resolve(config.persistData);
+    const fileExisted = fs.existsSync(persistPath);
+    const loaded = loadMockData(mockDataStore, config.typesDir, persistPath);
+    // Only write when: (a) file didn't exist yet (first launch), or (b) file loaded correctly.
+    // A corrupt file is left untouched so the user can fix or delete it manually.
+    if (!fileExisted || loaded) {
+      saveMockData(mockDataStore, config.typesDir, persistPath);
+    }
+  }
+
   // Global middlewares
   app.use(cors());
   app.use(express.json());
@@ -62,11 +77,13 @@ export function createServer(config: ServerConfig): Express {
 
   // Health route
   app.get('/health', (_req, res) => {
+    const typeMap = buildTypeMap(config.typesDir);
     res.json({
       status: 'ok',
       uptime: process.uptime(),
       cache: schemaCache.getStats(),
       writeStore: mockDataStore.getWriteStats(),
+      types: Array.from(typeMap.keys()),
       config: {
         typesDir: config.typesDir,
         port: config.port,
@@ -77,7 +94,7 @@ export function createServer(config: ServerConfig): Express {
     });
   });
 
-  // Custom JS injected into Swagger UI — adds a "Rebuild Data" button
+  // Custom JS injected into Swagger UI — adds "Rebuild Data" (all) and "Rebuild selected" (by type) buttons
   app.get('/swagger-rebuild.js', (_req, res) => {
     res.type('js').send(`
 window.addEventListener('load', function () {
@@ -87,15 +104,16 @@ window.addEventListener('load', function () {
     clearInterval(interval);
 
     var toolbar = document.createElement('div');
-    toolbar.style.cssText = 'background:#1b1b1b;padding:8px 20px;display:flex;align-items:center;gap:12px;';
+    toolbar.style.cssText = 'background:#1b1b1b;padding:8px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;';
 
     var label = document.createElement('span');
     label.textContent = 'TS Mock API';
     label.style.cssText = 'color:#fff;font-family:sans-serif;font-size:15px;font-weight:700;flex:1;';
 
+    // "Rebuild all" button
     var btn = document.createElement('button');
     btn.textContent = 'Rebuild Data';
-    btn.title = 'Clear all cached mock data and regenerate on next requests';
+    btn.title = 'Clear all cached mock data and regenerate';
     btn.style.cssText = 'background:#49cc90;color:#fff;border:none;padding:6px 18px;border-radius:4px;cursor:pointer;font-size:13px;font-weight:700;font-family:sans-serif;';
 
     btn.addEventListener('click', function () {
@@ -118,7 +136,61 @@ window.addEventListener('load', function () {
         });
     });
 
+    // Type selector dropdown
+    var select = document.createElement('select');
+    select.style.cssText = 'background:#2d2d2d;color:#fff;border:1px solid #555;padding:5px 10px;border-radius:4px;font-size:13px;font-family:sans-serif;cursor:pointer;';
+
+    var placeholder = document.createElement('option');
+    placeholder.textContent = 'Select type\u2026';
+    placeholder.value = '';
+    select.appendChild(placeholder);
+
+    // "Rebuild selected" button
+    var rebuildBtn = document.createElement('button');
+    rebuildBtn.textContent = 'Rebuild selected';
+    rebuildBtn.style.cssText = 'background:#61affe;color:#fff;border:none;padding:6px 18px;border-radius:4px;cursor:pointer;font-size:13px;font-weight:700;font-family:sans-serif;';
+
+    rebuildBtn.addEventListener('click', function () {
+      var type = select.value;
+      if (!type) return;
+      rebuildBtn.disabled = true;
+      rebuildBtn.textContent = 'Rebuilding\u2026';
+      fetch('/mock-reset/' + encodeURIComponent(type), { method: 'POST' })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          rebuildBtn.textContent = 'Done (' + (data.count || 0) + ' items)';
+          setTimeout(function () {
+            rebuildBtn.textContent = 'Rebuild selected';
+            rebuildBtn.disabled = false;
+          }, 2000);
+        })
+        .catch(function () {
+          rebuildBtn.style.background = '#f93e3e';
+          rebuildBtn.textContent = 'Error';
+          rebuildBtn.disabled = false;
+          setTimeout(function () {
+            rebuildBtn.style.background = '#61affe';
+            rebuildBtn.textContent = 'Rebuild selected';
+          }, 2500);
+        });
+    });
+
+    // Populate the type dropdown from /health
+    fetch('/health')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var types = data.types || [];
+        types.forEach(function (t) {
+          var opt = document.createElement('option');
+          opt.value = t;
+          opt.textContent = t;
+          select.appendChild(opt);
+        });
+      });
+
     toolbar.appendChild(label);
+    toolbar.appendChild(select);
+    toolbar.appendChild(rebuildBtn);
     toolbar.appendChild(btn);
     container.parentNode.insertBefore(toolbar, container);
   }, 100);
@@ -126,12 +198,43 @@ window.addEventListener('load', function () {
 `);
   });
 
-  // Mock data reset endpoint
+  // Mock data reset endpoint (full reset)
   app.post('/mock-reset', (_req, res) => {
     const mockCleared = mockDataStore.clear();
     schemaCache.clear();
     seedAllPools(config);
+    if (config.persistData) {
+      saveMockData(mockDataStore, config.typesDir, path.resolve(config.persistData));
+    }
     res.json({ message: 'Mock data store cleared', cleared: mockCleared });
+  });
+
+  // Selective reset endpoint — regenerates mock data for a single type
+  app.post('/mock-reset/:typeName', (req, res) => {
+    const { typeName } = req.params;
+    const typeMap = buildTypeMap(config.typesDir);
+    const typeFilePath = typeMap.get(typeName);
+
+    if (!typeFilePath) {
+      res.status(404).json({
+        error: 'Not Found',
+        message: `Unknown type "${typeName}". No @endpoint interface matches this name.`,
+      });
+      return;
+    }
+
+    const newPool = generateMockArray(typeFilePath, typeName, { arrayLength: POOL_SIZE });
+    mockDataStore.setPool(typeName, typeFilePath, newPool);
+
+    if (config.persistData) {
+      saveMockData(mockDataStore, config.typesDir, path.resolve(config.persistData));
+    }
+
+    res.json({
+      message: `Mock data regenerated for type "${typeName}"`,
+      type: typeName,
+      count: newPool.length,
+    });
   });
 
   // Swagger documentation - use app.locals.swaggerSpec for dynamic updates
@@ -200,6 +303,12 @@ export function startServer(
       const newSwaggerSpec = generateOpenAPISpec(config);
       app.locals.swaggerSpec = newSwaggerSpec;
       seedAllPools(config);
+
+      // Persist updated pools (affected types now have freshly generated data)
+      if (config.persistData) {
+        saveMockData(mockDataStore, config.typesDir, path.resolve(config.persistData));
+      }
+
       logger.success('Swagger spec regenerated with updated endpoints');
     });
   }

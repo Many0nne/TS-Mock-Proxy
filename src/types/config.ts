@@ -43,6 +43,13 @@ export interface ServerConfig {
     patch?: boolean;
     delete?: boolean;
   };
+
+  /**
+   * Path to persist mock data to a JSON file (absolute or relative to CWD).
+   * Set to false or leave undefined to disable persistence (default).
+   * Recommended value when enabled: '.mock-data.json'
+   */
+  persistData?: string | false;
 }
 
 /**

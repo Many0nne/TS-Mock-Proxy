@@ -84,6 +84,7 @@ Options:
   -p, --port <number>           Server port (default: 8080)
   -l, --latency <range>         Latency simulation "min-max" (e.g., 500-2000)
   --mock-mode <strict|dev>      Mock mode (default: dev)
+  --persist-data [path]         Persist mock data to JSON file (default: .mock-data.json)
   --no-hot-reload               Disable auto-reload on changes
   --no-cache                    Disable schema caching
   -v, --verbose                 Enable verbose logging
@@ -303,6 +304,77 @@ export interface Product {
 - `npm test -- constraintExtractor.test.ts` - Test constraint JSDoc extraction
 - `npm test -- constraintValidator.test.ts` - Test constraint validation
 - `npm test -- constrainedGenerator.test.ts` - Test constrained data generation
+
+---
+
+## JSON Persistence
+
+By default, mock data is purely in-memory and resets on every server restart. Enable persistence to keep data between sessions or share a stable dataset across restarts.
+
+### Activation
+
+**CLI:**
+```bash
+npx ts-mock-proxy --types-dir ./types --persist-data
+# Uses default path: .mock-data.json
+
+npx ts-mock-proxy --types-dir ./types --persist-data ./data/mocks.json
+# Custom path
+```
+
+**Wizard:** enable in the advanced options section.
+
+**Config file** (`.mock-config.json`):
+```json
+{ "persistData": ".mock-data.json" }
+```
+
+### File Format
+
+The file is a flat JSON object keyed by TypeScript interface name:
+
+```json
+{
+  "User": [
+    { "id": 1, "name": "Alice", "email": "alice@example.com" },
+    { "id": 2, "name": "Bob",   "email": "bob@example.com" }
+  ],
+  "Post": [
+    { "id": 1, "title": "Hello World", "authorId": 1 }
+  ]
+}
+```
+
+You can edit this file manually while the server is stopped. Changes are loaded on the next startup.
+
+> **Warning:** if the server is running and a mutation (POST/PUT/PATCH/DELETE) occurs between your manual edit and the next restart, the automatic save will overwrite your edits. Stop the server before editing the file.
+
+### Behaviour
+
+| Situation | Result |
+|---|---|
+| First launch, no file | File created with generated data |
+| Restart, file present | Pools replaced by file content |
+| New type added to `typesDir` | Generated and added to file at startup |
+| POST / PUT / PATCH / DELETE | File updated atomically after every mutation |
+| `POST /mock-reset` | File overwritten with freshly generated data |
+| `POST /mock-reset/User` | Only `User` regenerated and saved |
+| `[]` in file | Preserved as-is — not regenerated (intentional empty state) |
+| Invalid JSON in file | Warning emitted, server starts normally, file not overwritten |
+| Hot-reload (type file changed) | Affected types regenerated and saved; others untouched |
+
+Writes are atomic: the server writes to `.mock-data.json.tmp` first then renames it, so an interrupted write never corrupts the existing file.
+
+### Selective Rebuild
+
+Regenerate one type without affecting others:
+
+```bash
+POST /mock-reset/User
+# → {"message": "Mock data regenerated for type \"User\"", "type": "User", "count": 10}
+```
+
+The Swagger UI also exposes a type selector dropdown ("Select type… → Rebuild selected") next to the existing "Rebuild Data" (all) button.
 
 ---
 

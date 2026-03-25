@@ -51,6 +51,7 @@ async function main() {
     .option('--no-cache', 'Disable schema caching')
     .option('-v, --verbose', 'Enable verbose logging', false)
     .option('--mock-mode <strict|dev>', 'Mock mode: "dev" enables all mock features (default), "strict" disables them')
+    .option('--persist-data [path]', 'Persist mock data to JSON file (default path: .mock-data.json)')
     .option('--interactive', 'Force interactive mode')
     .action(async (options) => {
       // If --interactive flag is set, run wizard instead
@@ -77,6 +78,14 @@ async function main() {
       // Resolve mockMode: CLI > ENV > default
       const mockMode = resolveMockMode(options.mockMode);
 
+      // Resolve persistData: --persist-data with no arg → default path; with path → use it; absent → disabled
+      let persistData: string | undefined;
+      if (options.persistData !== undefined) {
+        persistData = typeof options.persistData === 'string' && options.persistData !== ''
+          ? options.persistData
+          : '.mock-data.json';
+      }
+
       // Build the configuration
       const config: ServerConfig = {
         typesDir,
@@ -86,6 +95,7 @@ async function main() {
         cache: options.cache !== false,
         verbose: options.verbose,
         mockMode,
+        persistData,
       };
 
       // Configure the global cache

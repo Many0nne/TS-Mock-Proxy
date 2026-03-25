@@ -220,4 +220,54 @@ describe('MockDataStore', () => {
       expect(store.getStats()).toEqual({ pools: 0 });
     });
   });
+
+  describe('getLivePool', () => {
+    it('returns pool alone when write store and deletedIds are empty', () => {
+      const pool = [{ id: 1, name: 'Alice' }, { id: 2, name: 'Bob' }];
+      store.setPool('User', '/path/user.ts', pool);
+      expect(store.getLivePool('User', '/path/user.ts')).toEqual(pool);
+    });
+
+    it('returns write store entries in priority over pool items with same ID', () => {
+      store.setPool('User', '/path/user.ts', [{ id: 1, name: 'Alice' }]);
+      store.setById('User', '/path/user.ts', '1', { id: 1, name: 'Alice Updated' });
+      const live = store.getLivePool('User', '/path/user.ts');
+      expect(live).toHaveLength(1);
+      expect(live[0]).toEqual({ id: 1, name: 'Alice Updated' });
+    });
+
+    it('excludes IDs marked deleted', () => {
+      store.setPool('User', '/path/user.ts', [{ id: 1, name: 'Alice' }, { id: 2, name: 'Bob' }]);
+      store.markDeleted('User', '/path/user.ts', '1');
+      const live = store.getLivePool('User', '/path/user.ts');
+      expect(live).toHaveLength(1);
+      expect(live[0]).toEqual({ id: 2, name: 'Bob' });
+    });
+
+    it('returns [] when all items are deleted', () => {
+      store.setPool('User', '/path/user.ts', [{ id: 1 }, { id: 2 }]);
+      store.markDeleted('User', '/path/user.ts', '1');
+      store.markDeleted('User', '/path/user.ts', '2');
+      expect(store.getLivePool('User', '/path/user.ts')).toEqual([]);
+    });
+
+    it('merges write store entries with remaining pool items', () => {
+      store.setPool('User', '/path/user.ts', [
+        { id: 1, name: 'Alice' },
+        { id: 2, name: 'Bob' },
+      ]);
+      // POST creates a new item (id: 3) in write store
+      store.setById('User', '/path/user.ts', '3', { id: 3, name: 'Charlie' });
+      const live = store.getLivePool('User', '/path/user.ts');
+      expect(live).toHaveLength(3);
+      const names = live.map((item) => item['name']);
+      expect(names).toContain('Alice');
+      expect(names).toContain('Bob');
+      expect(names).toContain('Charlie');
+    });
+
+    it('returns [] when no pool has been seeded', () => {
+      expect(store.getLivePool('Unknown', '/path/unknown.ts')).toEqual([]);
+    });
+  });
 });
