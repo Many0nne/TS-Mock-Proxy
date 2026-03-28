@@ -1,4 +1,6 @@
 <p align="center" height="200">
+
+[![gitcgr](https://gitcgr.com/badge/Many0nne/TS-Mock-API.svg)](https://gitcgr.com/Many0nne/TS-Mock-API)
   <img src=".github/TS-Mock-API.png" alt="TS-Mock-Proxy" width="500" />
 </p>
 
